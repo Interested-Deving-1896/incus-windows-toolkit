@@ -279,6 +279,46 @@ test_apps_conf_format() {
     done < "$conf"
 }
 
+# --- TUI tests ---
+
+test_tui_script_exists() {
+    [[ -f "$IWT_ROOT/tui/iwt-tui.sh" ]]
+}
+
+test_tui_script_executable() {
+    [[ -x "$IWT_ROOT/tui/iwt-tui.sh" ]]
+}
+
+test_tui_has_shebang() {
+    local first_line
+    first_line=$(head -1 "$IWT_ROOT/tui/iwt-tui.sh")
+    [[ "$first_line" == "#!/usr/bin/env bash" ]]
+}
+
+test_tui_has_main_menu() {
+    local content
+    content=$(cat "$IWT_ROOT/tui/iwt-tui.sh")
+    echo "$content" | grep -q 'menu_main'
+}
+
+test_tui_has_dialog_detection() {
+    local content
+    content=$(cat "$IWT_ROOT/tui/iwt-tui.sh")
+    echo "$content" | grep -q 'dialog\|whiptail'
+}
+
+test_cli_help_mentions_tui() {
+    local output
+    output=$("$IWT_ROOT/cli/iwt.sh" help 2>&1)
+    echo "$output" | grep -q 'tui'
+}
+
+test_cli_tui_dispatch_exists() {
+    local content
+    content=$(cat "$IWT_ROOT/cli/iwt.sh")
+    echo "$content" | grep -q 'tui).*iwt-tui'
+}
+
 # --- Lint ---
 
 test_shellcheck() {
@@ -362,6 +402,13 @@ run_unit_tests() {
     run_test "CLI vm help has net"     test_cli_vm_help_mentions_net
     run_test "Backend net funcs"       test_backend_net_functions_exist
     run_test "apps.conf format"        test_apps_conf_format
+    run_test "TUI script exists"       test_tui_script_exists
+    run_test "TUI script executable"   test_tui_script_executable
+    run_test "TUI has shebang"         test_tui_has_shebang
+    run_test "TUI has main menu"       test_tui_has_main_menu
+    run_test "TUI has dialog detect"   test_tui_has_dialog_detection
+    run_test "CLI help mentions tui"   test_cli_help_mentions_tui
+    run_test "CLI tui dispatch exists" test_cli_tui_dispatch_exists
 }
 
 run_lint() {

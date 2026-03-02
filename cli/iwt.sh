@@ -41,6 +41,7 @@ Commands:
   vm          Create, start, stop, and manage Windows VMs
   profiles    Install and manage Incus VM profiles
   remoteapp   Launch Windows apps as seamless Linux windows
+  tui         Launch interactive terminal UI
   doctor      Check system prerequisites
   config      Manage IWT configuration
   version     Show version
@@ -1359,6 +1360,7 @@ main() {
         vm)         cmd_vm "$@" ;;
         profiles)   cmd_profiles "$@" ;;
         remoteapp)  cmd_remoteapp "$@" ;;
+        tui)        exec "$IWT_ROOT/tui/iwt-tui.sh" "$@" ;;
         doctor)     cmd_doctor "$@" ;;
         config)     cmd_config "$@" ;;
         completion) cmd_completion "$@" ;;
