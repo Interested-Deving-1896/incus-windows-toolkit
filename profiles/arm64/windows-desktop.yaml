@@ -1,0 +1,49 @@
+# Incus profile: Windows Desktop VM (ARM64)
+# Tuning derived from bvm's Raspberry Pi / ARM Linux defaults.
+#
+# Notes:
+# - No Hyper-V enlightenments on ARM (KVM handles this differently)
+# - Secure Boot requires ARM UEFI firmware (AAVMF)
+# - Memory kept lower for SBC targets; increase for server-class ARM
+
+description: Windows 11 ARM desktop VM optimized for ARM64
+config:
+  security.secureboot: "true"
+  security.csm: "false"
+
+  # Conservative defaults for SBCs; override for server-class ARM
+  limits.cpu: "4"
+  limits.memory: "4GiB"
+
+  # ARM KVM doesn't support Hyper-V enlightenments
+  raw.qemu: >-
+    -cpu host
+    -machine virt,gic-version=max
+
+  agent.nic_config: "true"
+  cloud-init.user-data: ""
+
+devices:
+  root:
+    type: disk
+    path: /
+    pool: default
+    size: 64GiB
+
+  tpm:
+    type: tpm
+    path: /dev/tpm0
+
+  display:
+    type: gpu
+    gputype: virtual
+
+  eth0:
+    type: nic
+    network: incusbr0
+    nictype: bridged
+
+  shared:
+    type: disk
+    source: /home
+    path: /shared

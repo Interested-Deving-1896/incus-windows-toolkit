@@ -1,0 +1,56 @@
+# Incus profile: Windows Desktop VM (x86_64)
+# Tuning derived from quickemu's Windows defaults.
+#
+# Apply with: incus profile create windows-desktop < profiles/x86_64/windows-desktop.yaml
+#         or: iwt profiles install
+
+description: Windows 11 desktop VM optimized for x86_64
+config:
+  # Boot
+  security.secureboot: "true"
+  security.csm: "false"
+
+  # CPU -- expose host CPU features for best compatibility
+  limits.cpu: "4"
+  raw.qemu: >-
+    -cpu host,hv_relaxed,hv_spinlocks=0x1fff,hv_vapic,hv_time,hv_crash,hv_reset,hv_vpindex,hv_runtime,hv_synic,hv_stimer,hv_frequencies,hv_reenlightenment,hv_tlbflush,hv_ipi,hv_avic
+    -global kvm-pit.lost_tick_policy=discard
+
+  # Memory -- ballooning enabled for dynamic allocation
+  limits.memory: "8GiB"
+
+  # Agent
+  agent.nic_config: "true"
+
+  # Cloud-init not used for Windows
+  cloud-init.user-data: ""
+
+devices:
+  # VirtIO root disk
+  root:
+    type: disk
+    path: /
+    pool: default
+    size: 64GiB
+
+  # TPM 2.0 (required for Windows 11)
+  tpm:
+    type: tpm
+    path: /dev/tpm0
+
+  # Display -- SPICE for clipboard and USB redirection
+  display:
+    type: gpu
+    gputype: virtual
+
+  # Default NIC -- VirtIO for performance
+  eth0:
+    type: nic
+    network: incusbr0
+    nictype: bridged
+
+  # Shared folder via 9p/virtiofs (mount in guest via WinFsp)
+  shared:
+    type: disk
+    source: /home
+    path: /shared

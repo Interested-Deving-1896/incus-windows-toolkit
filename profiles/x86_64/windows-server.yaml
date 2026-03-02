@@ -1,0 +1,33 @@
+# Incus profile: Windows Server VM (x86_64)
+# Headless configuration for server workloads.
+
+description: Windows Server VM optimized for headless x86_64 operation
+config:
+  security.secureboot: "true"
+  security.csm: "false"
+
+  limits.cpu: "4"
+  limits.memory: "4GiB"
+
+  raw.qemu: >-
+    -cpu host,hv_relaxed,hv_spinlocks=0x1fff,hv_vapic,hv_time,hv_crash,hv_reset,hv_vpindex,hv_runtime,hv_synic,hv_stimer,hv_frequencies,hv_reenlightenment,hv_tlbflush,hv_ipi,hv_avic
+    -global kvm-pit.lost_tick_policy=discard
+
+  agent.nic_config: "true"
+  cloud-init.user-data: ""
+
+devices:
+  root:
+    type: disk
+    path: /
+    pool: default
+    size: 64GiB
+
+  tpm:
+    type: tpm
+    path: /dev/tpm0
+
+  eth0:
+    type: nic
+    network: incusbr0
+    nictype: bridged
