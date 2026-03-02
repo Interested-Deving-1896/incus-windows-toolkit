@@ -246,15 +246,56 @@ download_consumer_x86_64() {
 
 # --- ARM64 consumer Windows via UUP dump ---
 
-download_consumer_arm64() {
+# Map display language name to BCP-47 language code
+lang_name_to_code() {
+    case "$1" in
+        "English (United States)") echo "en-us" ;;
+        "English International")   echo "en-gb" ;;
+        "Chinese (Simplified)")    echo "zh-cn" ;;
+        "Chinese (Traditional)")   echo "zh-tw" ;;
+        "French")                  echo "fr-fr" ;;
+        "German")                  echo "de-de" ;;
+        "Italian")                 echo "it-it" ;;
+        "Japanese")                echo "ja-jp" ;;
+        "Korean")                  echo "ko-kr" ;;
+        "Portuguese")              echo "pt-pt" ;;
+        "Brazilian Portuguese")    echo "pt-br" ;;
+        "Russian")                 echo "ru-ru" ;;
+        "Spanish")                 echo "es-es" ;;
+        "Spanish (Mexico)")        echo "es-mx" ;;
+        "Arabic")                  echo "ar-sa" ;;
+        "Bulgarian")               echo "bg-bg" ;;
+        "Croatian")                echo "hr-hr" ;;
+        "Czech")                   echo "cs-cz" ;;
+        "Danish")                  echo "da-dk" ;;
+        "Dutch")                   echo "nl-nl" ;;
+        "Estonian")                echo "et-ee" ;;
+        "Finnish")                 echo "fi-fi" ;;
+        "French Canadian")         echo "fr-ca" ;;
+        "Greek")                   echo "el-gr" ;;
+        "Hebrew")                  echo "he-il" ;;
+        "Hungarian")               echo "hu-hu" ;;
+        "Latvian")                 echo "lv-lv" ;;
+        "Lithuanian")              echo "lt-lt" ;;
+        "Norwegian")               echo "nb-no" ;;
+        "Polish")                  echo "pl-pl" ;;
+        "Romanian")                echo "ro-ro" ;;
+        "Serbian Latin")           echo "sr-latn-rs" ;;
+        "Slovak")                  echo "sk-sk" ;;
+        "Slovenian")               echo "sl-si" ;;
+        "Swedish")                 echo "sv-se" ;;
+        "Thai")                    echo "th-th" ;;
+        "Turkish")                 echo "tr-tr" ;;
+        "Ukrainian")               echo "uk-ua" ;;
+        *)
+            echo "$1" | tr '[:upper:]' '[:lower:]' | tr ' ' '-'
+            ;;
+    esac
+}
+
+uup_find_arm64_build() {
     local version="$1"
 
-    require_cmd curl jq
-
-    info "ARM64 ISOs are not directly available from Microsoft."
-    info "Using UUP dump API to find the latest ARM64 build..."
-
-    # UUP dump API: find latest ARM64 build
     local search_query="windows ${version} arm64"
     local api_url="https://api.uupdump.net/listid.php"
 
@@ -274,60 +315,287 @@ download_consumer_arm64() {
     local build_title
     build_title=$(echo "$builds_json" | jq -r \
         '[.response.builds[] | select(.arch=="arm64")] | first | .title // "unknown"')
+
     info "Found build: $build_title"
     info "Build ID: $build_id"
+    echo "$build_id"
+}
 
-    # Get download info for this build
+uup_get_download_urls() {
+    local build_id="$1"
+    local lang_code="$2"
+    local edition="${3:-professional}"
+
+    local api_url="https://api.uupdump.net/get.php"
+    local pkg_json
+    pkg_json=$(curl --disable --silent --fail \
+        "${api_url}?id=${build_id}&lang=${lang_code}&edition=${edition}") || \
+        die "Failed to get package list from UUP dump API"
+
+    # Check for API errors
+    local api_error
+    api_error=$(echo "$pkg_json" | jq -r '.response.error // empty')
+    if [[ -n "$api_error" ]]; then
+        die "UUP dump API error: $api_error"
+    fi
+
+    echo "$pkg_json"
+}
+
+uup_download_files() {
+    local pkg_json="$1"
+    local download_dir="$2"
+
+    mkdir -p "$download_dir"
+
+    local file_count
+    file_count=$(echo "$pkg_json" | jq -r '.response.files | length')
+    info "Downloading $file_count UUP files..."
+
+    local downloaded=0
+    local failed=0
+
+    # Download each file
+    echo "$pkg_json" | jq -r '.response.files | to_entries[] | "\(.key)\t\(.value.url)\t\(.value.sha1)\t\(.value.size)"' | \
+    while IFS=$'\t' read -r filename url sha1 size; do
+        local dest="$download_dir/$filename"
+
+        # Skip if already downloaded and correct size
+        if [[ -f "$dest" ]]; then
+            local existing_size
+            existing_size=$(stat -c%s "$dest" 2>/dev/null || stat -f%z "$dest" 2>/dev/null || echo "0")
+            if [[ "$existing_size" == "$size" ]]; then
+                downloaded=$((downloaded + 1))
+                continue
+            fi
+        fi
+
+        info "  [$((downloaded + failed + 1))/$file_count] $filename ($(human_size "$size"))"
+        if retry 3 curl --disable --silent --location --fail \
+            --output "$dest" -- "$url"; then
+            downloaded=$((downloaded + 1))
+
+            # Verify SHA-1 if available
+            if [[ -n "$sha1" && "$sha1" != "null" ]] && command -v sha1sum &>/dev/null; then
+                local actual_sha1
+                actual_sha1=$(sha1sum "$dest" | awk '{print $1}')
+                if [[ "$actual_sha1" != "$sha1" ]]; then
+                    warn "SHA-1 mismatch for $filename (expected: ${sha1:0:12}..., got: ${actual_sha1:0:12}...)"
+                fi
+            fi
+        else
+            err "  Failed to download: $filename"
+            failed=$((failed + 1))
+        fi
+    done
+
+    ok "Downloaded UUP files to $download_dir"
+}
+
+uup_convert_to_iso() {
+    local download_dir="$1"
+    local output_path="$2"
+    local edition="${3:-professional}"
+
+    # Check for required tools
+    require_cmd cabextract wimlib-imagex
+
+    if ! command -v xorriso &>/dev/null && ! command -v mkisofs &>/dev/null; then
+        die "Need xorriso or mkisofs to create ISO"
+    fi
+
+    local work_dir
+    work_dir=$(mktemp -d "${download_dir}/convert-XXXXXX")
+
+    info "Extracting CAB files..."
+    local cab_count=0
+    for cab in "$download_dir"/*.cab; do
+        [[ -f "$cab" ]] || continue
+        cabextract -d "$work_dir" -q "$cab" 2>/dev/null || true
+        cab_count=$((cab_count + 1))
+    done
+
+    # Extract ESD files (newer UUP format)
+    for esd in "$download_dir"/*.esd "$download_dir"/*.ESD; do
+        [[ -f "$esd" ]] || continue
+        local esd_name
+        esd_name=$(basename "$esd")
+        info "  Processing: $esd_name"
+
+        # Check if this is the main install ESD
+        local image_count
+        image_count=$(wimlib-imagex info "$esd" 2>/dev/null | grep -c "^Index:" || echo "0")
+        if [[ "$image_count" -gt 1 ]]; then
+            # Multi-image ESD — this is the install image
+            info "  Found install ESD with $image_count images"
+
+            # Find the edition index
+            local target_index=""
+            local idx=1
+            while [[ $idx -le $image_count ]]; do
+                local img_name
+                img_name=$(wimlib-imagex info "$esd" "$idx" 2>/dev/null | grep "^Name:" | sed 's/^Name:[[:space:]]*//' || true)
+                local img_flags
+                img_flags=$(wimlib-imagex info "$esd" "$idx" 2>/dev/null | grep "^Flags:" | sed 's/^Flags:[[:space:]]*//' || true)
+
+                if echo "$img_flags" | grep -qi "$edition"; then
+                    target_index=$idx
+                    info "  Found edition '$edition' at index $idx: $img_name"
+                    break
+                fi
+                idx=$((idx + 1))
+            done
+
+            if [[ -z "$target_index" ]]; then
+                # Fall back to last image (usually the most complete edition)
+                target_index=$image_count
+                warn "  Edition '$edition' not found by flag; using index $target_index"
+            fi
+
+            # Export the target edition to install.wim
+            info "  Exporting install.wim (this may take several minutes)..."
+            wimlib-imagex export "$esd" "$target_index" \
+                "$work_dir/sources/install.wim" --compress=LZX 2>/dev/null || \
+                die "Failed to export install.wim from ESD"
+        else
+            # Single-image ESD — likely boot.wim or a component
+            if echo "$esd_name" | grep -qi "boot"; then
+                mkdir -p "$work_dir/sources"
+                wimlib-imagex export "$esd" all \
+                    "$work_dir/sources/boot.wim" --compress=LZX 2>/dev/null || true
+            fi
+        fi
+    done
+
+    # Verify we have the essential files
+    if [[ ! -f "$work_dir/sources/install.wim" ]]; then
+        # Try to find install.wim in extracted CABs
+        local found_wim
+        found_wim=$(find "$work_dir" -name 'install.wim' -print -quit 2>/dev/null || true)
+        if [[ -n "$found_wim" ]]; then
+            mkdir -p "$work_dir/sources"
+            mv "$found_wim" "$work_dir/sources/install.wim"
+        else
+            die "Could not produce install.wim from UUP files. The build may require the uup-dump converter tool."
+        fi
+    fi
+
+    # Create boot structure if missing
+    if [[ ! -f "$work_dir/sources/boot.wim" ]]; then
+        local found_boot
+        found_boot=$(find "$work_dir" -name 'boot.wim' -print -quit 2>/dev/null || true)
+        if [[ -n "$found_boot" ]]; then
+            mkdir -p "$work_dir/sources"
+            mv "$found_boot" "$work_dir/sources/boot.wim"
+        fi
+    fi
+
+    # Create ISO
+    info "Creating ISO image..."
+    mkdir -p "$(dirname "$output_path")"
+
+    if command -v xorriso &>/dev/null; then
+        xorriso -as mkisofs \
+            -iso-level 3 -udf \
+            -o "$output_path" "$work_dir" 2>&1 | tail -3
+    else
+        mkisofs -iso-level 4 -udf \
+            -o "$output_path" "$work_dir" 2>&1 | tail -3
+    fi
+
+    rm -rf "$work_dir"
+
+    local size
+    size=$(stat -c%s "$output_path" 2>/dev/null || stat -f%z "$output_path" 2>/dev/null || echo "0")
+    ok "Created ARM64 ISO: $output_path ($(human_size "$size"))"
+}
+
+download_consumer_arm64() {
+    local version="$1"
+
+    require_cmd curl jq
+
+    info "ARM64 ISOs are not directly available from Microsoft."
+    info "Using UUP dump API to find the latest ARM64 build..."
+
+    local build_id
+    build_id=$(uup_find_arm64_build "$version")
+
     local lang_code
-    case "$LANG_NAME" in
-        "English (United States)") lang_code="en-us" ;;
-        "English International")   lang_code="en-gb" ;;
-        "Chinese (Simplified)")    lang_code="zh-cn" ;;
-        "Chinese (Traditional)")   lang_code="zh-tw" ;;
-        "French")                  lang_code="fr-fr" ;;
-        "German")                  lang_code="de-de" ;;
-        "Italian")                 lang_code="it-it" ;;
-        "Japanese")                lang_code="ja-jp" ;;
-        "Korean")                  lang_code="ko-kr" ;;
-        "Portuguese")              lang_code="pt-pt" ;;
-        "Brazilian Portuguese")    lang_code="pt-br" ;;
-        "Russian")                 lang_code="ru-ru" ;;
-        "Spanish")                 lang_code="es-es" ;;
-        "Spanish (Mexico)")        lang_code="es-mx" ;;
-        *)
-            # Try lowercase with dashes
-            lang_code=$(echo "$LANG_NAME" | tr '[:upper:]' '[:lower:]' | tr ' ' '-')
-            warn "Guessing language code: $lang_code"
-            ;;
-    esac
+    lang_code=$(lang_name_to_code "$LANG_NAME")
+    info "Language: $LANG_NAME ($lang_code)"
 
-    # For ARM64, we provide the UUP dump link and instructions
-    # since building the ISO requires running their converter script
-    local uup_url="https://uupdump.net/selectlang.php?id=${build_id}"
+    # Get package URLs from UUP dump
+    local edition="professional"
+    info "Edition: $edition"
+
+    local pkg_json
+    pkg_json=$(uup_get_download_urls "$build_id" "$lang_code" "$edition")
+
+    local filename="Win${version}_arm64_${lang_code}.iso"
+    local output_path="$OUTPUT_DIR/$filename"
+    local uup_download_dir="$OUTPUT_DIR/.uup-${build_id}"
 
     echo ""
-    bold "ARM64 ISO Download"
-    echo ""
-    info "UUP dump does not provide pre-built ISOs. You need to:"
-    echo ""
-    echo "  1. Visit: $uup_url"
-    echo "  2. Select language: $LANG_NAME"
-    echo "  3. Select edition: Pro"
-    echo "  4. Choose 'Download and convert to ISO'"
-    echo "  5. Run the downloaded script to build the ISO"
-    echo ""
-    echo "  Alternatively, on Linux:"
-    echo ""
-    echo "    git clone https://github.com/uup-dump/converter"
-    echo "    cd converter"
-    echo "    ./convert.sh wubi ${build_id} ${lang_code} professional"
-    echo ""
-    info "Once you have the ISO, run:"
-    echo "    iwt image build --iso <path-to-iso> --arch arm64"
+    bold "ARM64 ISO Build"
     echo ""
 
-    # Return the UUP dump URL for reference
-    echo "$uup_url"
+    # Check if we have cabextract + wimlib for local conversion
+    local can_convert=true
+    for cmd in cabextract wimlib-imagex; do
+        if ! command -v "$cmd" &>/dev/null; then
+            can_convert=false
+            break
+        fi
+    done
+
+    if [[ "$can_convert" == true ]]; then
+        info "Required tools found. Building ISO locally..."
+        echo ""
+
+        # Download UUP files
+        uup_download_files "$pkg_json" "$uup_download_dir"
+
+        # Convert to ISO
+        uup_convert_to_iso "$uup_download_dir" "$output_path" "$edition"
+
+        # Clean up UUP download directory
+        rm -rf "$uup_download_dir"
+
+        echo "$output_path"
+    else
+        # Fallback: provide manual instructions
+        local uup_url="https://uupdump.net/selectlang.php?id=${build_id}"
+
+        warn "Missing tools for local ISO build (need: cabextract, wimlib-imagex)"
+        echo ""
+        info "Install them with:"
+        echo "    sudo apt install cabextract wimlib-tools    # Debian/Ubuntu"
+        echo "    sudo dnf install cabextract wimlib-utils    # Fedora"
+        echo "    sudo pacman -S cabextract wimlib            # Arch"
+        echo ""
+        info "Then re-run: iwt image download --version $version --arch arm64"
+        echo ""
+        info "Or download manually:"
+        echo ""
+        echo "  1. Visit: $uup_url"
+        echo "  2. Select language: $LANG_NAME"
+        echo "  3. Select edition: Pro"
+        echo "  4. Choose 'Download and convert to ISO'"
+        echo "  5. Run the downloaded script to build the ISO"
+        echo ""
+        echo "  Alternatively, on Linux:"
+        echo ""
+        echo "    git clone https://github.com/uup-dump/converter"
+        echo "    cd converter"
+        echo "    ./convert.sh wubi ${build_id} ${lang_code} professional"
+        echo ""
+        info "Once you have the ISO, run:"
+        echo "    iwt image build --iso <path-to-iso> --arch arm64"
+        echo ""
+
+        echo "$uup_url"
+    fi
 }
 
 # --- Windows Server evaluation download ---

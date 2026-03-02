@@ -118,32 +118,34 @@ menu_vm() {
     while true; do
         local choice
         choice=$(_dlg_menu "VM Management" "Select an action:" \
-            "status"    "Show VM status" \
-            "start"     "Start a VM" \
-            "stop"      "Stop a VM" \
-            "create"    "Create a new VM" \
-            "rdp"       "Open RDP desktop session" \
-            "snapshot"  "Manage snapshots" \
-            "share"     "Manage shared folders" \
-            "gpu"       "Manage GPU passthrough" \
-            "usb"       "Manage USB devices" \
-            "net"       "Manage networking" \
-            "remoteapp" "Launch Windows apps" \
-            "back"      "Back to main menu") || break
+            "status"      "Show VM status" \
+            "start"       "Start a VM" \
+            "stop"        "Stop a VM" \
+            "create"      "Create a new VM" \
+            "rdp"         "Open RDP desktop session" \
+            "setup-guest" "Install guest tools (WinFsp, VirtIO)" \
+            "snapshot"    "Manage snapshots" \
+            "share"       "Manage shared folders" \
+            "gpu"         "Manage GPU passthrough" \
+            "usb"         "Manage USB devices" \
+            "net"         "Manage networking" \
+            "remoteapp"   "Launch Windows apps" \
+            "back"        "Back to main menu") || break
 
         case "$choice" in
-            status)    menu_vm_status ;;
-            start)     menu_vm_action "start" ;;
-            stop)      menu_vm_action "stop" ;;
-            create)    menu_vm_create ;;
-            rdp)       menu_vm_action "rdp" ;;
-            snapshot)  menu_snapshot ;;
-            share)     menu_share ;;
-            gpu)       menu_gpu ;;
-            usb)       menu_usb ;;
-            net)       menu_net ;;
-            remoteapp) menu_remoteapp ;;
-            back)      break ;;
+            status)      menu_vm_status ;;
+            start)       menu_vm_action "start" ;;
+            stop)        menu_vm_action "stop" ;;
+            create)      menu_vm_create ;;
+            rdp)         menu_vm_action "rdp" ;;
+            setup-guest) menu_setup_guest ;;
+            snapshot)    menu_snapshot ;;
+            share)       menu_share ;;
+            gpu)         menu_gpu ;;
+            usb)         menu_usb ;;
+            net)         menu_net ;;
+            remoteapp)   menu_remoteapp ;;
+            back)        break ;;
         esac
     done
 }
@@ -176,6 +178,29 @@ menu_vm_create() {
         "windows-server"  "Headless server configuration") || return
 
     _run_cmd "Creating VM" "$IWT_CMD" vm create --name "$name" --profile "$profile"
+}
+
+# --- Guest Setup Menu ---
+
+menu_setup_guest() {
+    local vm
+    vm=$(_pick_vm) || return
+
+    local choice
+    choice=$(_dlg_menu "Guest Setup: $vm" "Select action:" \
+        "check"   "Check guest tool status" \
+        "all"     "Install everything (WinFsp + VirtIO)" \
+        "winfsp"  "Install WinFsp only" \
+        "virtio"  "Install VirtIO guest tools only" \
+        "back"    "Back") || return
+
+    case "$choice" in
+        check)  _run_cmd "Guest Status" "$IWT_CMD" vm setup-guest --vm "$vm" --check ;;
+        all)    _run_cmd "Guest Setup" "$IWT_CMD" vm setup-guest --vm "$vm" --all ;;
+        winfsp) _run_cmd "WinFsp Setup" "$IWT_CMD" vm setup-guest --vm "$vm" --install-winfsp ;;
+        virtio) _run_cmd "VirtIO Setup" "$IWT_CMD" vm setup-guest --vm "$vm" --install-virtio ;;
+        back)   return ;;
+    esac
 }
 
 # --- Snapshot Menu ---

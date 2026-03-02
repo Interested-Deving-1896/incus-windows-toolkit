@@ -586,6 +586,28 @@ Log "IWT: Auto-mount scheduled task registered"
 Log "IWT: Guest tools setup complete"
 PS1EOF
 
+    # Bundle VirtIO guest tools installer if cached
+    local guest_tools_exe
+    guest_tools_exe=$(find "$IWT_CACHE_DIR" -name 'virtio-win-guest-tools*' -print -quit 2>/dev/null || true)
+    if [[ -n "$guest_tools_exe" && -f "$guest_tools_exe" ]]; then
+        cp "$guest_tools_exe" "$tools_dir/virtio-win-guest-tools.exe"
+        info "Bundled VirtIO guest tools installer"
+
+        # Add auto-install to the setup script
+        cat >> "$tools_dir/setup-guest-tools.ps1" <<'PS1VIRTIO'
+
+# Install VirtIO guest tools (balloon, serial, QEMU agent)
+$virtioInstaller = Join-Path $PSScriptRoot "virtio-win-guest-tools.exe"
+if (Test-Path $virtioInstaller) {
+    Log "IWT: Installing VirtIO guest tools..."
+    $proc = Start-Process $virtioInstaller -ArgumentList "/install /quiet /norestart" -Wait -PassThru
+    Log "IWT: VirtIO guest tools install exit code: $($proc.ExitCode)"
+}
+PS1VIRTIO
+    else
+        info "VirtIO guest tools not cached; run 'iwt image drivers download' to include them"
+    fi
+
     ok "Guest tools prepared"
 }
 

@@ -203,6 +203,9 @@ cmd_image() {
         download)
             exec "$IWT_ROOT/image-pipeline/scripts/download-iso.sh" "$@"
             ;;
+        drivers)
+            exec "$IWT_ROOT/image-pipeline/scripts/manage-drivers.sh" "$@"
+            ;;
         list)
             exec "$IWT_ROOT/image-pipeline/scripts/download-iso.sh" --list-versions
             ;;
@@ -213,6 +216,7 @@ iwt image - Build and download Windows images for Incus
 Subcommands:
   download    Download a Windows ISO from Microsoft
   build       Build an Incus-ready image from an ISO
+  drivers     Download and manage VirtIO drivers
   list        List available Windows versions
 
 Download options:
@@ -308,6 +312,9 @@ cmd_vm() {
         net)
             cmd_vm_net "$@"
             ;;
+        setup-guest)
+            exec "$IWT_ROOT/guest/setup-guest.sh" "$@"
+            ;;
         help|--help|-h)
             cat <<EOF
 iwt vm - Manage Windows VMs
@@ -319,6 +326,7 @@ Subcommands:
   status [name]       Show VM status
   list                List all Incus VMs
   rdp [name]          Open full RDP desktop session
+  setup-guest [opts]  Install guest tools (WinFsp, VirtIO) in a running VM
   snapshot <action>   Manage VM snapshots
   share <action>      Manage shared folders
   gpu <action>        Manage GPU passthrough
@@ -330,6 +338,13 @@ Create options:
   --profile PROFILE   Incus profile to use (default: windows-desktop)
   --image PATH        Path to modified ISO from 'iwt image build'
   --disk PATH         Path to QCOW2 disk image
+
+Setup-guest options:
+  --all               Install everything (default)
+  --install-winfsp    Install WinFsp only
+  --install-virtio    Install VirtIO guest tools only
+  --check             Only check status, don't install
+  --vm NAME           Target VM
 
 Example:
   iwt vm create --name win11 --image windows-modified.iso

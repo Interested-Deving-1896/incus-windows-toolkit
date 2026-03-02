@@ -319,6 +319,109 @@ test_cli_tui_dispatch_exists() {
     echo "$content" | grep -q 'tui).*iwt-tui'
 }
 
+# --- VirtIO driver management tests ---
+
+test_manage_drivers_script_exists() {
+    [[ -x "$IWT_ROOT/image-pipeline/scripts/manage-drivers.sh" ]]
+}
+
+test_manage_drivers_help() {
+    local output
+    output=$("$IWT_ROOT/image-pipeline/scripts/manage-drivers.sh" help 2>&1)
+    echo "$output" | grep -q 'download'
+    echo "$output" | grep -q 'verify'
+}
+
+test_cli_image_drivers_dispatch() {
+    local content
+    content=$(cat "$IWT_ROOT/cli/iwt.sh")
+    echo "$content" | grep -q 'drivers)'
+    echo "$content" | grep -q 'manage-drivers'
+}
+
+test_cli_image_help_mentions_drivers() {
+    local output
+    output=$("$IWT_ROOT/cli/iwt.sh" image help 2>&1)
+    echo "$output" | grep -q 'drivers'
+}
+
+test_build_has_virtio_download() {
+    local content
+    content=$(cat "$IWT_ROOT/image-pipeline/scripts/build-image.sh")
+    echo "$content" | grep -q 'download_virtio_iso'
+    echo "$content" | grep -q 'virtio-win-guest-tools'
+}
+
+# --- ARM64 pipeline tests ---
+
+test_download_arm64_functions() {
+    local content
+    content=$(cat "$IWT_ROOT/image-pipeline/scripts/download-iso.sh")
+    echo "$content" | grep -q 'uup_find_arm64_build'
+    echo "$content" | grep -q 'uup_get_download_urls'
+    echo "$content" | grep -q 'uup_convert_to_iso'
+    echo "$content" | grep -q 'lang_name_to_code'
+}
+
+test_lang_name_to_code_mapping() {
+    # Source the script functions without running main
+    local content
+    content=$(cat "$IWT_ROOT/image-pipeline/scripts/download-iso.sh")
+    # Check that the function handles key languages
+    echo "$content" | grep -q '"English (United States)") echo "en-us"'
+    echo "$content" | grep -q '"Japanese").*echo "ja-jp"'
+    echo "$content" | grep -q '"Chinese (Simplified)").*echo "zh-cn"'
+}
+
+test_download_help_mentions_arm64() {
+    local output
+    output=$("$IWT_ROOT/image-pipeline/scripts/download-iso.sh" --help 2>&1)
+    echo "$output" | grep -q 'arm64'
+}
+
+# --- Guest setup tests ---
+
+test_guest_setup_script_exists() {
+    [[ -x "$IWT_ROOT/guest/setup-guest.sh" ]]
+}
+
+test_winfsp_setup_script_exists() {
+    [[ -x "$IWT_ROOT/guest/setup-winfsp.sh" ]]
+}
+
+test_guest_setup_help() {
+    local output
+    output=$("$IWT_ROOT/guest/setup-guest.sh" --help 2>&1)
+    echo "$output" | grep -q 'install-winfsp'
+    echo "$output" | grep -q 'install-virtio'
+}
+
+test_winfsp_setup_help() {
+    local output
+    output=$("$IWT_ROOT/guest/setup-winfsp.sh" --help 2>&1)
+    echo "$output" | grep -q 'WinFsp'
+}
+
+test_cli_vm_setup_guest_dispatch() {
+    local content
+    content=$(cat "$IWT_ROOT/cli/iwt.sh")
+    echo "$content" | grep -q 'setup-guest)'
+    echo "$content" | grep -q 'guest/setup-guest'
+}
+
+test_cli_vm_help_mentions_setup_guest() {
+    local output
+    output=$("$IWT_ROOT/cli/iwt.sh" vm help 2>&1)
+    echo "$output" | grep -q 'setup-guest'
+}
+
+test_tui_has_setup_guest() {
+    local content
+    content=$(cat "$IWT_ROOT/tui/iwt-tui.sh")
+    echo "$content" | grep -q 'menu_setup_guest'
+    echo "$content" | grep -q 'setup-guest'
+}
+
 # --- Lint ---
 
 test_shellcheck() {
@@ -409,6 +512,21 @@ run_unit_tests() {
     run_test "TUI has dialog detect"   test_tui_has_dialog_detection
     run_test "CLI help mentions tui"   test_cli_help_mentions_tui
     run_test "CLI tui dispatch exists" test_cli_tui_dispatch_exists
+    run_test "Driver mgmt script"      test_manage_drivers_script_exists
+    run_test "Driver mgmt help"        test_manage_drivers_help
+    run_test "CLI image drivers"       test_cli_image_drivers_dispatch
+    run_test "CLI image help drivers"  test_cli_image_help_mentions_drivers
+    run_test "Build has VirtIO dl"     test_build_has_virtio_download
+    run_test "ARM64 download funcs"    test_download_arm64_functions
+    run_test "ARM64 lang mapping"      test_lang_name_to_code_mapping
+    run_test "Download help arm64"     test_download_help_mentions_arm64
+    run_test "Guest setup script"      test_guest_setup_script_exists
+    run_test "WinFsp setup script"     test_winfsp_setup_script_exists
+    run_test "Guest setup help"        test_guest_setup_help
+    run_test "WinFsp setup help"       test_winfsp_setup_help
+    run_test "CLI vm setup-guest"      test_cli_vm_setup_guest_dispatch
+    run_test "CLI vm help setup"       test_cli_vm_help_mentions_setup_guest
+    run_test "TUI has setup-guest"     test_tui_has_setup_guest
 }
 
 run_lint() {
