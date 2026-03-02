@@ -408,6 +408,126 @@ test_tui_has_setup_guest() {
     grep -q 'setup-guest' "$IWT_ROOT/tui/iwt-tui.sh"
 }
 
+# --- Template tests ---
+
+test_template_files_exist() {
+    [[ -f "$IWT_ROOT/templates/gaming.yaml" ]]
+    [[ -f "$IWT_ROOT/templates/dev.yaml" ]]
+    [[ -f "$IWT_ROOT/templates/server.yaml" ]]
+    [[ -f "$IWT_ROOT/templates/minimal.yaml" ]]
+}
+
+test_template_engine_exists() {
+    [[ -f "$IWT_ROOT/templates/engine.sh" ]]
+}
+
+test_template_engine_functions() {
+    grep -q 'template_list' "$IWT_ROOT/templates/engine.sh"
+    grep -q 'template_get' "$IWT_ROOT/templates/engine.sh"
+    grep -q 'template_show' "$IWT_ROOT/templates/engine.sh"
+    grep -q 'template_get_first_boot_scripts' "$IWT_ROOT/templates/engine.sh"
+}
+
+test_template_yaml_has_description() {
+    for tpl in "$IWT_ROOT/templates"/*.yaml; do
+        [[ -f "$tpl" ]] || continue
+        grep -q '^description:' "$tpl" || return 1
+    done
+}
+
+test_template_yaml_has_profile() {
+    for tpl in "$IWT_ROOT/templates"/*.yaml; do
+        [[ -f "$tpl" ]] || continue
+        grep -q '^profile:' "$tpl" || return 1
+    done
+}
+
+test_cli_vm_create_accepts_template() {
+    grep -q '\-\-template' "$IWT_ROOT/cli/iwt.sh"
+}
+
+test_cli_vm_template_dispatch() {
+    grep -q 'template)' "$IWT_ROOT/cli/iwt.sh"
+    grep -q 'cmd_vm_template' "$IWT_ROOT/cli/iwt.sh"
+}
+
+test_cli_vm_help_mentions_template() {
+    local output
+    output=$("$IWT_ROOT/cli/iwt.sh" vm help 2>&1)
+    echo "$output" | grep -q 'template'
+}
+
+# --- Backup tests ---
+
+test_backup_script_exists() {
+    [[ -x "$IWT_ROOT/cli/backup.sh" ]]
+}
+
+test_backup_help() {
+    local output
+    output=$("$IWT_ROOT/cli/backup.sh" help 2>&1)
+    echo "$output" | grep -q 'create'
+    echo "$output" | grep -q 'restore'
+    echo "$output" | grep -q 'export'
+}
+
+test_cli_vm_backup_dispatch() {
+    grep -q 'backup)' "$IWT_ROOT/cli/iwt.sh"
+    grep -q 'backup.sh' "$IWT_ROOT/cli/iwt.sh"
+}
+
+test_cli_vm_export_dispatch() {
+    grep -q 'export)' "$IWT_ROOT/cli/iwt.sh"
+    grep -q 'cmd_export' "$IWT_ROOT/cli/iwt.sh"
+}
+
+test_cli_vm_import_dispatch() {
+    grep -q 'import)' "$IWT_ROOT/cli/iwt.sh"
+    grep -q 'cmd_import' "$IWT_ROOT/cli/iwt.sh"
+}
+
+test_cli_vm_help_mentions_backup() {
+    local output
+    output=$("$IWT_ROOT/cli/iwt.sh" vm help 2>&1)
+    echo "$output" | grep -q 'backup'
+    echo "$output" | grep -q 'export'
+    echo "$output" | grep -q 'import'
+}
+
+test_tui_has_backup_menu() {
+    grep -q 'menu_backup' "$IWT_ROOT/tui/iwt-tui.sh"
+}
+
+# --- First-boot tests ---
+
+test_first_boot_script_exists() {
+    [[ -x "$IWT_ROOT/guest/first-boot.sh" ]]
+}
+
+test_first_boot_help() {
+    local output
+    output=$("$IWT_ROOT/guest/first-boot.sh" --help 2>&1)
+    echo "$output" | grep -q 'script'
+    echo "$output" | grep -q 'from-template'
+}
+
+test_cli_vm_first_boot_dispatch() {
+    grep -q 'first-boot)' "$IWT_ROOT/cli/iwt.sh"
+    grep -q 'first-boot.sh' "$IWT_ROOT/cli/iwt.sh"
+}
+
+test_cli_vm_help_mentions_first_boot() {
+    local output
+    output=$("$IWT_ROOT/cli/iwt.sh" vm help 2>&1)
+    echo "$output" | grep -q 'first-boot'
+}
+
+test_templates_have_first_boot() {
+    # At least gaming and dev templates should have first_boot sections
+    grep -q 'first_boot:' "$IWT_ROOT/templates/gaming.yaml"
+    grep -q 'first_boot:' "$IWT_ROOT/templates/dev.yaml"
+}
+
 # --- Lint ---
 
 test_shellcheck() {
@@ -513,6 +633,26 @@ run_unit_tests() {
     run_test "CLI vm setup-guest"      test_cli_vm_setup_guest_dispatch
     run_test "CLI vm help setup"       test_cli_vm_help_mentions_setup_guest
     run_test "TUI has setup-guest"     test_tui_has_setup_guest
+    run_test "Template files exist"    test_template_files_exist
+    run_test "Template engine exists"  test_template_engine_exists
+    run_test "Template engine funcs"   test_template_engine_functions
+    run_test "Templates have desc"     test_template_yaml_has_description
+    run_test "Templates have profile"  test_template_yaml_has_profile
+    run_test "CLI create --template"   test_cli_vm_create_accepts_template
+    run_test "CLI vm template cmd"     test_cli_vm_template_dispatch
+    run_test "CLI vm help template"    test_cli_vm_help_mentions_template
+    run_test "Backup script exists"    test_backup_script_exists
+    run_test "Backup help"             test_backup_help
+    run_test "CLI vm backup dispatch"  test_cli_vm_backup_dispatch
+    run_test "CLI vm export dispatch"  test_cli_vm_export_dispatch
+    run_test "CLI vm import dispatch"  test_cli_vm_import_dispatch
+    run_test "CLI vm help backup"      test_cli_vm_help_mentions_backup
+    run_test "TUI has backup menu"     test_tui_has_backup_menu
+    run_test "First-boot script"       test_first_boot_script_exists
+    run_test "First-boot help"         test_first_boot_help
+    run_test "CLI vm first-boot"       test_cli_vm_first_boot_dispatch
+    run_test "CLI vm help first-boot"  test_cli_vm_help_mentions_first_boot
+    run_test "Templates have hooks"    test_templates_have_first_boot
 }
 
 run_lint() {

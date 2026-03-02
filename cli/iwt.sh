@@ -315,6 +315,23 @@ cmd_vm() {
         setup-guest)
             exec "$IWT_ROOT/guest/setup-guest.sh" "$@"
             ;;
+        template)
+            cmd_vm_template "$@"
+            ;;
+        backup)
+            exec "$IWT_ROOT/cli/backup.sh" "$@"
+            ;;
+        export)
+            source "$IWT_ROOT/cli/backup.sh"
+            cmd_export "$@"
+            ;;
+        import)
+            source "$IWT_ROOT/cli/backup.sh"
+            cmd_import "$@"
+            ;;
+        first-boot)
+            exec "$IWT_ROOT/guest/first-boot.sh" "$@"
+            ;;
         help|--help|-h)
             cat <<EOF
 iwt vm - Manage Windows VMs
@@ -327,6 +344,11 @@ Subcommands:
   list                List all Incus VMs
   rdp [name]          Open full RDP desktop session
   setup-guest [opts]  Install guest tools (WinFsp, VirtIO) in a running VM
+  template <action>   List and inspect VM templates/presets
+  backup <action>     Backup and restore VMs
+  export [name]       Publish VM as reusable Incus image
+  import <path>       Import VM from backup or image
+  first-boot [opts]   Run first-boot PowerShell scripts in a VM
   snapshot <action>   Manage VM snapshots
   share <action>      Manage shared folders
   gpu <action>        Manage GPU passthrough
@@ -335,6 +357,7 @@ Subcommands:
 
 Create options:
   --name NAME         VM name (default: windows)
+  --template NAME     Use a preset template (gaming, dev, server, minimal)
   --profile PROFILE   Incus profile to use (default: windows-desktop)
   --image PATH        Path to modified ISO from 'iwt image build'
   --disk PATH         Path to QCOW2 disk image
@@ -347,8 +370,11 @@ Setup-guest options:
   --vm NAME           Target VM
 
 Example:
+  iwt vm create --template gaming --name my-gaming-vm
   iwt vm create --name win11 --image windows-modified.iso
   iwt vm rdp win11
+  iwt vm backup create win11
+  iwt vm first-boot --vm win11 --run "winget install Git.Git"
   iwt vm net forward 8080 --to 80
   iwt vm usb attach 046d:c52b --name logitech
 
@@ -367,16 +393,36 @@ cmd_vm_create() {
     local profile="windows-desktop"
     local image=""
     local disk=""
+    local template=""
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            --name)    name="$2"; shift 2 ;;
-            --profile) profile="$2"; shift 2 ;;
-            --image)   image="$2"; shift 2 ;;
-            --disk)    disk="$2"; shift 2 ;;
-            *)         err "Unknown option: $1"; exit 1 ;;
+            --name)     name="$2"; shift 2 ;;
+            --profile)  profile="$2"; shift 2 ;;
+            --template) template="$2"; shift 2 ;;
+            --image)    image="$2"; shift 2 ;;
+            --disk)     disk="$2"; shift 2 ;;
+            *)          err "Unknown option: $1"; exit 1 ;;
         esac
     done
+
+    # Apply template if specified
+    local tpl_cpu="" tpl_mem="" tpl_disk="" gpu_overlay=""
+    if [[ -n "$template" ]]; then
+        source "$IWT_ROOT/templates/engine.sh"
+        local tpl_file
+        tpl_file=$(template_path "$template")
+        [[ -f "$tpl_file" ]] || die "Template not found: $template (available: $(find "$IWT_ROOT/templates/" -name '*.yaml' -exec basename {} .yaml \; 2>/dev/null | tr '\n' ' '))"
+
+        # Template values (CLI flags override template)
+        profile=$(template_get "$tpl_file" "profile" "$profile")
+        tpl_cpu=$(template_get_nested "$tpl_file" "resources" "cpu")
+        tpl_mem=$(template_get_nested "$tpl_file" "resources" "memory")
+        tpl_disk=$(template_get_nested "$tpl_file" "resources" "disk")
+        gpu_overlay=$(template_get "$tpl_file" "gpu_overlay")
+
+        info "Using template: $template"
+    fi
 
     # Check if VM already exists
     if incus info "$name" &>/dev/null; then
@@ -392,6 +438,59 @@ cmd_vm_create() {
     info "Creating VM: $name (profile: $profile)"
     incus init "$name" --vm --empty --profile "$profile"
 
+    # Apply GPU overlay profile if specified
+    if [[ -n "$gpu_overlay" && "$gpu_overlay" != "none" ]]; then
+        local gpu_profile="gpu-${gpu_overlay}"
+        if incus profile show "$gpu_profile" &>/dev/null; then
+            info "Applying GPU overlay: $gpu_profile"
+            incus profile add "$name" "$gpu_profile"
+        else
+            warn "GPU profile '$gpu_profile' not found; skipping overlay"
+        fi
+    fi
+
+    # Apply template resource overrides
+    if [[ -n "$tpl_cpu" ]]; then
+        incus config set "$name" limits.cpu="$tpl_cpu"
+    fi
+    if [[ -n "$tpl_mem" ]]; then
+        incus config set "$name" limits.memory="$tpl_mem"
+    fi
+    if [[ -n "$tpl_disk" ]]; then
+        incus config device set "$name" root size="$tpl_disk"
+    fi
+
+    # Apply template config overrides
+    if [[ -n "$template" ]]; then
+        local boot_autostart
+        boot_autostart=$(template_get_nested "$tpl_file" "config" "boot.autostart")
+        if [[ -n "$boot_autostart" ]]; then
+            incus config set "$name" boot.autostart="$boot_autostart"
+        fi
+        local boot_priority
+        boot_priority=$(template_get_nested "$tpl_file" "config" "boot.autostart.priority")
+        if [[ -n "$boot_priority" ]]; then
+            incus config set "$name" boot.autostart.priority="$boot_priority"
+        fi
+    fi
+
+    # Apply template device additions
+    if [[ -n "$template" ]]; then
+        while IFS='|' read -r dev_name dev_key dev_val; do
+            [[ -n "$dev_name" ]] || continue
+            # Skip root device (handled above via size override)
+            [[ "$dev_name" == "root" ]] && continue
+            local dev_type
+            dev_type=$(template_get_nested "$tpl_file" "devices" "type" "disk")
+            # Add device if it doesn't exist, or set property
+            if ! incus config device get "$name" "$dev_name" type &>/dev/null 2>&1; then
+                incus config device add "$name" "$dev_name" "$dev_type" "${dev_key}=${dev_val}" 2>/dev/null || true
+            else
+                incus config device set "$name" "$dev_name" "${dev_key}=${dev_val}" 2>/dev/null || true
+            fi
+        done < <(template_get_devices "$tpl_file")
+    fi
+
     if [[ -n "$image" ]]; then
         [[ -f "$image" ]] || die "ISO not found: $image"
         info "Attaching install ISO: $image"
@@ -404,7 +503,67 @@ cmd_vm_create() {
         incus config device add "$name" data disk source="$(realpath "$disk")"
     fi
 
+    # Store template name and first-boot scripts in VM metadata for post-install
+    if [[ -n "$template" ]]; then
+        incus config set "$name" user.iwt.template="$template"
+
+        # Save first-boot scripts to config for later execution
+        local boot_scripts
+        boot_scripts=$(template_get_first_boot_scripts "$tpl_file" | base64 -w0)
+        if [[ -n "$boot_scripts" ]]; then
+            incus config set "$name" user.iwt.first_boot="$boot_scripts"
+        fi
+    fi
+
     ok "VM '$name' created. Start with: iwt vm start $name"
+    if [[ -n "$template" ]]; then
+        info "Template '$template' applied. After Windows install, run: iwt vm setup-guest --vm $name"
+    fi
+}
+
+# --- Template subcommand ---
+
+cmd_vm_template() {
+    local subcmd="${1:-help}"
+    shift || true
+
+    source "$IWT_ROOT/templates/engine.sh"
+
+    case "$subcmd" in
+        list|ls)
+            bold "Available VM templates:"
+            echo ""
+            template_list
+            ;;
+        show)
+            local name="${1:?Usage: iwt vm template show <name>}"
+            template_show "$name"
+            ;;
+        help|--help|-h)
+            cat <<EOF
+iwt vm template - Manage VM templates/presets
+
+Subcommands:
+  list          List available templates
+  show <name>   Show template details
+
+Available templates:
+$(template_list 2>/dev/null || echo "  (none)")
+
+Templates are YAML files in: $IWT_ROOT/templates/
+Create custom templates by copying an existing one.
+
+Usage with vm create:
+  iwt vm create --template gaming --name my-vm
+  iwt vm create --template dev --name dev-vm
+  iwt vm create --template server --name srv
+EOF
+            ;;
+        *)
+            err "Unknown template subcommand: $subcmd"
+            exit 1
+            ;;
+    esac
 }
 
 cmd_vm_snapshot() {

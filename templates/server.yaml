@@ -1,0 +1,34 @@
+# IWT VM Template: Server
+# Headless Windows Server with minimal resources and auto-start.
+#
+# Usage: iwt vm create --template server --name my-server
+
+description: "Headless Windows Server with minimal resources"
+
+profile: windows-server
+
+resources:
+  cpu: 2
+  memory: 4GiB
+  disk: 40GiB
+
+config:
+  # Auto-start on host boot
+  boot.autostart: "true"
+  boot.autostart.priority: "5"
+
+setup_guest:
+  - virtio
+
+first_boot:
+  - |
+    # Disable Server Manager auto-launch
+    Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\ServerManager" -Name "DoNotOpenServerManagerAtLogon" -Value 1 -Type DWord -Force
+  - |
+    # Enable Remote Management
+    Enable-PSRemoting -Force -SkipNetworkProfileCheck 2>$null
+    Set-Item WSMan:\localhost\Client\TrustedHosts -Value "*" -Force
+  - |
+    # Configure Windows Firewall for common server ports
+    New-NetFirewallRule -DisplayName "IWT-HTTP" -Direction Inbound -Protocol TCP -LocalPort 80 -Action Allow 2>$null
+    New-NetFirewallRule -DisplayName "IWT-HTTPS" -Direction Inbound -Protocol TCP -LocalPort 443 -Action Allow 2>$null

@@ -124,6 +124,7 @@ menu_vm() {
             "create"      "Create a new VM" \
             "rdp"         "Open RDP desktop session" \
             "setup-guest" "Install guest tools (WinFsp, VirtIO)" \
+            "backup"      "Backup, export, and import VMs" \
             "snapshot"    "Manage snapshots" \
             "share"       "Manage shared folders" \
             "gpu"         "Manage GPU passthrough" \
@@ -139,6 +140,7 @@ menu_vm() {
             create)      menu_vm_create ;;
             rdp)         menu_vm_action "rdp" ;;
             setup-guest) menu_setup_guest ;;
+            backup)      menu_backup ;;
             snapshot)    menu_snapshot ;;
             share)       menu_share ;;
             gpu)         menu_gpu ;;
@@ -170,14 +172,82 @@ menu_vm_action() {
 }
 
 menu_vm_create() {
-    local name profile
+    local name method
 
     name=$(_dlg_input "Create VM" "VM name:" "windows") || return
-    profile=$(_dlg_menu "Create VM" "Select profile:" \
-        "windows-desktop" "Desktop with display, TPM, shared folders" \
-        "windows-server"  "Headless server configuration") || return
+    method=$(_dlg_menu "Create VM" "Creation method:" \
+        "template" "Use a preset template (recommended)" \
+        "manual"   "Choose profile manually") || return
 
-    _run_cmd "Creating VM" "$IWT_CMD" vm create --name "$name" --profile "$profile"
+    if [[ "$method" == "template" ]]; then
+        local template
+        template=$(_dlg_menu "Create VM" "Select template:" \
+            "gaming"  "GPU passthrough, high CPU/RAM, low-latency input" \
+            "dev"     "Shared folders, RDP, dev tools auto-install" \
+            "server"  "Headless, minimal resources, auto-start" \
+            "minimal" "Bare-bones for testing") || return
+        _run_cmd "Creating VM" "$IWT_CMD" vm create --name "$name" --template "$template"
+    else
+        local profile
+        profile=$(_dlg_menu "Create VM" "Select profile:" \
+            "windows-desktop" "Desktop with display, TPM, shared folders" \
+            "windows-server"  "Headless server configuration") || return
+        _run_cmd "Creating VM" "$IWT_CMD" vm create --name "$name" --profile "$profile"
+    fi
+}
+
+# --- Backup Menu ---
+
+menu_backup() {
+    while true; do
+        local choice
+        choice=$(_dlg_menu "Backup & Export" "Select action:" \
+            "create"  "Create VM backup" \
+            "restore" "Restore from backup" \
+            "list"    "List backups" \
+            "export"  "Export VM as Incus image" \
+            "import"  "Import from file" \
+            "delete"  "Delete a backup" \
+            "back"    "Back") || break
+
+        case "$choice" in
+            create)
+                local vm
+                vm=$(_pick_vm) || continue
+                _run_cmd "Backup" "$IWT_CMD" vm backup create "$vm"
+                ;;
+            restore)
+                local path
+                path=$(_dlg_input "Restore" "Backup file path:" "") || continue
+                local name
+                name=$(_dlg_input "Restore" "VM name:" "") || continue
+                _run_cmd "Restore" "$IWT_CMD" vm backup restore "$path" --name "$name"
+                ;;
+            list)
+                _run_cmd "Backups" "$IWT_CMD" vm backup list
+                ;;
+            export)
+                local vm
+                vm=$(_pick_vm) || continue
+                local alias
+                alias=$(_dlg_input "Export" "Image alias:" "iwt-${vm}") || continue
+                _run_cmd "Export" "$IWT_CMD" vm export "$vm" --alias "$alias"
+                ;;
+            import)
+                local path
+                path=$(_dlg_input "Import" "File path:" "") || continue
+                local name
+                name=$(_dlg_input "Import" "VM name:" "") || continue
+                _run_cmd "Import" "$IWT_CMD" vm import "$path" --name "$name"
+                ;;
+            delete)
+                local name
+                name=$(_dlg_input "Delete Backup" "Backup filename:" "") || continue
+                _run_cmd "Delete" "$IWT_CMD" vm backup delete "$name"
+                ;;
+            back) break ;;
+        esac
+    done
 }
 
 # --- Guest Setup Menu ---

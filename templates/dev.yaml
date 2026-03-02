@@ -1,0 +1,47 @@
+# IWT VM Template: Development
+# Balanced VM for software development with shared folders and RDP.
+#
+# Usage: iwt vm create --template dev --name my-dev-vm
+
+description: "Development VM with shared folders, RDP, and balanced resources"
+
+profile: windows-desktop
+
+resources:
+  cpu: 4
+  memory: 8GiB
+  disk: 64GiB
+
+devices:
+  # Share the user's home directory
+  home:
+    type: disk
+    source: ${HOME}
+    path: /shared/home
+
+  # Share common project directories
+  projects:
+    type: disk
+    source: ${HOME}/projects
+    path: /shared/projects
+
+setup_guest:
+  - winfsp
+  - virtio
+
+first_boot:
+  - |
+    # Enable long paths for development tools
+    Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1 -Type DWord
+  - |
+    # Enable developer mode
+    Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock" -Name "AllowDevelopmentWithoutDevLicense" -Value 1 -Type DWord
+  - |
+    # Install winget (App Installer) if not present, then install common dev tools
+    $tools = @("Git.Git", "Microsoft.VisualStudioCode", "Microsoft.WindowsTerminal")
+    foreach ($tool in $tools) {
+        try { winget install --id $tool --accept-source-agreements --accept-package-agreements --silent 2>$null } catch {}
+    }
+  - |
+    # Configure PowerShell execution policy for scripts
+    Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope LocalMachine -Force

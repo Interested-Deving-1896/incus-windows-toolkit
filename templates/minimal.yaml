@@ -1,0 +1,25 @@
+# IWT VM Template: Minimal
+# Bare-bones VM with minimal resources for testing or lightweight tasks.
+#
+# Usage: iwt vm create --template minimal --name test-vm
+
+description: "Minimal VM for testing with low resource usage"
+
+profile: windows-desktop
+
+resources:
+  cpu: 2
+  memory: 4GiB
+  disk: 32GiB
+
+setup_guest:
+  - virtio
+
+first_boot:
+  - |
+    # Disable visual effects for performance
+    Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" -Name "VisualFXSetting" -Value 2 -Type DWord -Force
+  - |
+    # Disable search indexing
+    Stop-Service -Name "WSearch" -Force -ErrorAction SilentlyContinue
+    Set-Service -Name "WSearch" -StartupType Disabled

@@ -1,0 +1,42 @@
+# IWT VM Template: Gaming
+# Optimized for GPU-accelerated gaming with low-latency input.
+#
+# Usage: iwt vm create --template gaming --name my-gaming-vm
+
+description: "Gaming VM with GPU passthrough, high CPU/RAM, and USB input"
+
+profile: windows-desktop
+gpu_overlay: vfio-passthrough
+
+resources:
+  cpu: 8
+  memory: 16GiB
+  disk: 128GiB
+
+config:
+  # Hyper-V enlightenments for reduced latency
+  raw.qemu.extra: >-
+    -global kvm-pit.lost_tick_policy=discard
+
+devices:
+  # Large root disk for game installs
+  root:
+    size: 128GiB
+
+setup_guest:
+  - winfsp
+  - virtio
+
+first_boot:
+  - |
+    # Disable Windows Game Bar and DVR (reduces input latency)
+    Set-ItemProperty -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\GameDVR" -Name "AppCaptureEnabled" -Value 0 -Type DWord -Force
+    Set-ItemProperty -Path "HKCU:\System\GameConfigStore" -Name "GameDVR_Enabled" -Value 0 -Type DWord -Force
+  - |
+    # Set power plan to High Performance
+    powercfg /setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c
+  - |
+    # Disable mouse acceleration for raw input
+    Set-ItemProperty -Path "HKCU:\Control Panel\Mouse" -Name "MouseSpeed" -Value "0" -Type String -Force
+    Set-ItemProperty -Path "HKCU:\Control Panel\Mouse" -Name "MouseThreshold1" -Value "0" -Type String -Force
+    Set-ItemProperty -Path "HKCU:\Control Panel\Mouse" -Name "MouseThreshold2" -Value "0" -Type String -Force
