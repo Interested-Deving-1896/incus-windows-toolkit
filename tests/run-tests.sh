@@ -333,10 +333,8 @@ test_manage_drivers_help() {
 }
 
 test_cli_image_drivers_dispatch() {
-    local content
-    content=$(cat "$IWT_ROOT/cli/iwt.sh")
-    echo "$content" | grep -q 'drivers)'
-    echo "$content" | grep -q 'manage-drivers'
+    grep -q 'drivers)' "$IWT_ROOT/cli/iwt.sh"
+    grep -q 'manage-drivers' "$IWT_ROOT/cli/iwt.sh"
 }
 
 test_cli_image_help_mentions_drivers() {
@@ -346,31 +344,23 @@ test_cli_image_help_mentions_drivers() {
 }
 
 test_build_has_virtio_download() {
-    local content
-    content=$(cat "$IWT_ROOT/image-pipeline/scripts/build-image.sh")
-    echo "$content" | grep -q 'download_virtio_iso'
-    echo "$content" | grep -q 'virtio-win-guest-tools'
+    grep -q 'download_virtio_iso' "$IWT_ROOT/image-pipeline/scripts/build-image.sh"
+    grep -q 'virtio-win-guest-tools' "$IWT_ROOT/image-pipeline/scripts/build-image.sh"
 }
 
 # --- ARM64 pipeline tests ---
 
 test_download_arm64_functions() {
-    local content
-    content=$(cat "$IWT_ROOT/image-pipeline/scripts/download-iso.sh")
-    echo "$content" | grep -q 'uup_find_arm64_build'
-    echo "$content" | grep -q 'uup_get_download_urls'
-    echo "$content" | grep -q 'uup_convert_to_iso'
-    echo "$content" | grep -q 'lang_name_to_code'
+    grep -q 'uup_find_arm64_build' "$IWT_ROOT/image-pipeline/scripts/download-iso.sh"
+    grep -q 'uup_get_download_urls' "$IWT_ROOT/image-pipeline/scripts/download-iso.sh"
+    grep -q 'uup_convert_to_iso' "$IWT_ROOT/image-pipeline/scripts/download-iso.sh"
+    grep -q 'lang_name_to_code' "$IWT_ROOT/image-pipeline/scripts/download-iso.sh"
 }
 
 test_lang_name_to_code_mapping() {
-    # Source the script functions without running main
-    local content
-    content=$(cat "$IWT_ROOT/image-pipeline/scripts/download-iso.sh")
-    # Check that the function handles key languages
-    echo "$content" | grep -q '"English (United States)") echo "en-us"'
-    echo "$content" | grep -q '"Japanese").*echo "ja-jp"'
-    echo "$content" | grep -q '"Chinese (Simplified)").*echo "zh-cn"'
+    grep -q '"English (United States)") echo "en-us"' "$IWT_ROOT/image-pipeline/scripts/download-iso.sh"
+    grep -q '"Japanese").*echo "ja-jp"' "$IWT_ROOT/image-pipeline/scripts/download-iso.sh"
+    grep -q '"Chinese (Simplified)").*echo "zh-cn"' "$IWT_ROOT/image-pipeline/scripts/download-iso.sh"
 }
 
 test_download_help_mentions_arm64() {
@@ -403,10 +393,8 @@ test_winfsp_setup_help() {
 }
 
 test_cli_vm_setup_guest_dispatch() {
-    local content
-    content=$(cat "$IWT_ROOT/cli/iwt.sh")
-    echo "$content" | grep -q 'setup-guest)'
-    echo "$content" | grep -q 'guest/setup-guest'
+    grep -q 'setup-guest)' "$IWT_ROOT/cli/iwt.sh"
+    grep -q 'guest/setup-guest' "$IWT_ROOT/cli/iwt.sh"
 }
 
 test_cli_vm_help_mentions_setup_guest() {
@@ -416,10 +404,8 @@ test_cli_vm_help_mentions_setup_guest() {
 }
 
 test_tui_has_setup_guest() {
-    local content
-    content=$(cat "$IWT_ROOT/tui/iwt-tui.sh")
-    echo "$content" | grep -q 'menu_setup_guest'
-    echo "$content" | grep -q 'setup-guest'
+    grep -q 'menu_setup_guest' "$IWT_ROOT/tui/iwt-tui.sh"
+    grep -q 'setup-guest' "$IWT_ROOT/tui/iwt-tui.sh"
 }
 
 # --- Lint ---
