@@ -18,13 +18,23 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Fetch all branches and tags
+        run: git fetch --all --tags --prune
+
       - name: Push mirror to OpenOS-Project-OSP
+        env:
+          MIRROR_TOKEN: ${{ secrets.MIRROR_TOKEN }}
         run: |
+          # Use credential store to avoid token interpolation issues in URLs
+          git config --global credential.helper store
+          printf 'https://x-access-token:%s@github.com\n' "$MIRROR_TOKEN" \
+            > ~/.git-credentials
+
           git remote add mirror \
-            "https://x-access-token:${{ secrets.MIRROR_TOKEN }}@github.com/OpenOS-Project-OSP/incus-windows-toolkit.git"
+            "https://github.com/OpenOS-Project-OSP/incus-windows-toolkit.git"
 
-          # Mirror all branches
+          # Push all local branches and tags
           git push mirror --all --force
-
-          # Mirror all tags
           git push mirror --tags --force
+
+          rm -f ~/.git-credentials
