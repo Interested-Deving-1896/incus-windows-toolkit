@@ -17,6 +17,9 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          # Disable the default GITHUB_TOKEN credential so our MIRROR_TOKEN
+          # is used for the push step instead
+          persist-credentials: false
 
       - name: Fetch all branches and tags
         run: git fetch --all --tags --prune
@@ -25,7 +28,7 @@ jobs:
         env:
           MIRROR_TOKEN: ${{ secrets.MIRROR_TOKEN }}
         run: |
-          # Use credential store to avoid token interpolation issues in URLs
+          # Configure credential store with the mirror PAT
           git config --global credential.helper store
           printf 'https://x-access-token:%s@github.com\n' "$MIRROR_TOKEN" \
             > ~/.git-credentials
