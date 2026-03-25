@@ -1256,6 +1256,205 @@ test_incus_fleet_list() {
 
 # --- Runner ---
 
+# --- Security audit test functions ---
+
+test_security_audit_script_exists() {
+    [[ -f "$IWT_ROOT/guest/setup-security-audit.sh" ]]
+}
+
+test_security_audit_is_executable() {
+    [[ -x "$IWT_ROOT/guest/setup-security-audit.sh" ]]
+}
+
+test_security_audit_help() {
+    local out
+    out=$("$IWT_ROOT/guest/setup-security-audit.sh" --help 2>&1)
+    echo "$out" | grep -q '\-\-vm'
+    echo "$out" | grep -q '\-\-report'
+    echo "$out" | grep -q '\-\-json'
+}
+
+test_security_audit_has_ps_payload() {
+    grep -q 'AUDIT_SCRIPT=' "$IWT_ROOT/guest/setup-security-audit.sh"
+}
+
+test_security_audit_checks_defender() {
+    grep -q 'Get-MpComputerStatus\|AntivirusEnabled' "$IWT_ROOT/guest/setup-security-audit.sh"
+}
+
+test_security_audit_checks_firewall() {
+    grep -q 'Get-NetFirewallProfile' "$IWT_ROOT/guest/setup-security-audit.sh"
+}
+
+test_security_audit_checks_uac() {
+    grep -q 'EnableLUA\|UAC' "$IWT_ROOT/guest/setup-security-audit.sh"
+}
+
+test_security_audit_checks_bitlocker() {
+    grep -q 'Get-BitLockerVolume\|BitLocker' "$IWT_ROOT/guest/setup-security-audit.sh"
+}
+
+test_security_audit_checks_smbv1() {
+    grep -q 'EnableSMB1Protocol\|SMBv1' "$IWT_ROOT/guest/setup-security-audit.sh"
+}
+
+test_security_audit_checks_secureboot() {
+    grep -q 'Confirm-SecureBootUEFI\|SecureBoot' "$IWT_ROOT/guest/setup-security-audit.sh"
+}
+
+test_security_audit_checks_rdp() {
+    grep -q 'fDenyTSConnections\|RDP' "$IWT_ROOT/guest/setup-security-audit.sh"
+}
+
+test_security_audit_checks_laps() {
+    grep -q 'AdmPwdEnabled\|LAPS' "$IWT_ROOT/guest/setup-security-audit.sh"
+}
+
+test_security_audit_checks_auditpolicy() {
+    grep -q 'auditpol\|AuditPolicy' "$IWT_ROOT/guest/setup-security-audit.sh"
+}
+
+test_security_audit_has_display_fn() {
+    grep -q 'display_audit_results()' "$IWT_ROOT/guest/setup-security-audit.sh"
+}
+
+test_security_audit_has_json_flag() {
+    grep -q '\-\-json' "$IWT_ROOT/guest/setup-security-audit.sh"
+    grep -q 'JSON_OUTPUT' "$IWT_ROOT/guest/setup-security-audit.sh"
+}
+
+test_security_audit_has_report_flag() {
+    grep -q '\-\-report' "$IWT_ROOT/guest/setup-security-audit.sh"
+    grep -q 'REPORT_FILE' "$IWT_ROOT/guest/setup-security-audit.sh"
+}
+
+test_security_audit_has_fail_on_warn() {
+    grep -q '\-\-fail-on-warn' "$IWT_ROOT/guest/setup-security-audit.sh"
+    grep -q 'FAIL_ON_WARN' "$IWT_ROOT/guest/setup-security-audit.sh"
+}
+
+test_cli_vm_security_audit_dispatch() {
+    grep -q 'security-audit)' "$IWT_ROOT/cli/iwt.sh"
+    grep -q 'setup-security-audit.sh' "$IWT_ROOT/cli/iwt.sh"
+}
+
+test_cli_vm_help_mentions_security_audit() {
+    local out
+    out=$("$IWT_ROOT/cli/iwt.sh" vm help 2>&1)
+    echo "$out" | grep -q 'security-audit'
+}
+
+# --- Secure Boot check test functions ---
+
+test_sb_check_script_exists() {
+    [[ -f "$IWT_ROOT/guest/setup-secure-boot-check.sh" ]]
+}
+
+test_sb_check_is_executable() {
+    [[ -x "$IWT_ROOT/guest/setup-secure-boot-check.sh" ]]
+}
+
+test_sb_check_help() {
+    local out
+    out=$("$IWT_ROOT/guest/setup-secure-boot-check.sh" --help 2>&1)
+    echo "$out" | grep -q '\-\-vm'
+    echo "$out" | grep -q '\-\-apply-dbx-update'
+    echo "$out" | grep -q '\-\-apply-2023-certs'
+}
+
+test_sb_check_has_ps_payload() {
+    grep -q 'SB_AUDIT_SCRIPT=' "$IWT_ROOT/guest/setup-secure-boot-check.sh"
+}
+
+test_sb_check_checks_pk() {
+    grep -q 'Get-SecureBootUEFI.*PK\|Name PK' "$IWT_ROOT/guest/setup-secure-boot-check.sh"
+}
+
+test_sb_check_checks_kek() {
+    grep -q 'KEK\|Microsoft.*KEK' "$IWT_ROOT/guest/setup-secure-boot-check.sh"
+}
+
+test_sb_check_checks_db() {
+    grep -q '"db"\|Name db\|MicrosoftPCA' "$IWT_ROOT/guest/setup-secure-boot-check.sh"
+}
+
+test_sb_check_checks_dbx() {
+    grep -q '"dbx"\|Name dbx\|DBX' "$IWT_ROOT/guest/setup-secure-boot-check.sh"
+}
+
+test_sb_check_checks_available_updates() {
+    grep -q 'AvailableUpdates' "$IWT_ROOT/guest/setup-secure-boot-check.sh"
+}
+
+test_sb_check_checks_bootmgr() {
+    grep -q 'bootmgfw.efi\|BootManager' "$IWT_ROOT/guest/setup-secure-boot-check.sh"
+}
+
+test_sb_check_has_apply_dbx() {
+    grep -q '\-\-apply-dbx-update' "$IWT_ROOT/guest/setup-secure-boot-check.sh"
+    grep -q 'APPLY_DBX' "$IWT_ROOT/guest/setup-secure-boot-check.sh"
+}
+
+test_sb_check_has_apply_2023() {
+    grep -q '\-\-apply-2023-certs' "$IWT_ROOT/guest/setup-secure-boot-check.sh"
+    grep -q 'APPLY_2023' "$IWT_ROOT/guest/setup-secure-boot-check.sh"
+}
+
+test_sb_check_has_apply_revocations() {
+    grep -q '\-\-apply-revocations' "$IWT_ROOT/guest/setup-secure-boot-check.sh"
+    grep -q 'APPLY_REVOCATIONS' "$IWT_ROOT/guest/setup-secure-boot-check.sh"
+}
+
+test_sb_check_has_display_fn() {
+    grep -q 'display_sb_results()' "$IWT_ROOT/guest/setup-secure-boot-check.sh"
+}
+
+test_sb_check_has_json_flag() {
+    grep -q '\-\-json' "$IWT_ROOT/guest/setup-secure-boot-check.sh"
+    grep -q 'JSON_OUTPUT' "$IWT_ROOT/guest/setup-secure-boot-check.sh"
+}
+
+test_cli_vm_secure_boot_dispatch() {
+    grep -q 'secure-boot)' "$IWT_ROOT/cli/iwt.sh"
+    grep -q 'setup-secure-boot-check.sh' "$IWT_ROOT/cli/iwt.sh"
+}
+
+test_cli_vm_help_mentions_secure_boot() {
+    local out
+    out=$("$IWT_ROOT/cli/iwt.sh" vm help 2>&1)
+    echo "$out" | grep -q 'secure-boot'
+}
+
+# --- setup-guest.sh integration test functions ---
+
+test_guest_setup_has_security_audit_flag() {
+    grep -q '\-\-security-audit' "$IWT_ROOT/guest/setup-guest.sh"
+    grep -q 'RUN_SECURITY_AUDIT' "$IWT_ROOT/guest/setup-guest.sh"
+}
+
+test_guest_setup_has_sb_check_flag() {
+    grep -q '\-\-secure-boot-check' "$IWT_ROOT/guest/setup-guest.sh"
+    grep -q 'RUN_SB_CHECK' "$IWT_ROOT/guest/setup-guest.sh"
+}
+
+test_guest_setup_all_runs_audits() {
+    # --all should set both audit flags
+    grep -A5 '\-\-all)' "$IWT_ROOT/guest/setup-guest.sh" | grep -q 'RUN_SECURITY_AUDIT=true'
+    grep -A5 '\-\-all)' "$IWT_ROOT/guest/setup-guest.sh" | grep -q 'RUN_SB_CHECK=true'
+}
+
+test_guest_setup_calls_security_audit() {
+    grep -q 'setup-security-audit.sh' "$IWT_ROOT/guest/setup-guest.sh"
+}
+
+test_guest_setup_calls_sb_check() {
+    grep -q 'setup-secure-boot-check.sh' "$IWT_ROOT/guest/setup-guest.sh"
+}
+
+test_guest_setup_has_winbtrfs_status() {
+    grep -q 'btrfs\.sys\|WinBtrfs' "$IWT_ROOT/guest/setup-guest.sh"
+}
+
 run_unit_tests() {
     bold "Unit Tests"
     echo ""
@@ -1467,6 +1666,54 @@ run_unit_tests() {
     run_test "Doctor checks dwarfs"            test_doctor_checks_dwarfs
     run_test "Doctor mentions Btrfs"           test_doctor_output_mentions_btrfs
     run_test "Doctor mentions DwarFS"          test_doctor_output_mentions_dwarfs
+
+    # --- Security audit ---
+    run_test "Security audit script exists"          test_security_audit_script_exists
+    run_test "Security audit is executable"          test_security_audit_is_executable
+    run_test "Security audit help"                   test_security_audit_help
+    run_test "Security audit has audit script var"   test_security_audit_has_ps_payload
+    run_test "Security audit checks Defender"        test_security_audit_checks_defender
+    run_test "Security audit checks Firewall"        test_security_audit_checks_firewall
+    run_test "Security audit checks UAC"             test_security_audit_checks_uac
+    run_test "Security audit checks BitLocker"       test_security_audit_checks_bitlocker
+    run_test "Security audit checks SMBv1"           test_security_audit_checks_smbv1
+    run_test "Security audit checks Secure Boot"     test_security_audit_checks_secureboot
+    run_test "Security audit checks RDP"             test_security_audit_checks_rdp
+    run_test "Security audit checks LAPS"            test_security_audit_checks_laps
+    run_test "Security audit checks audit policy"    test_security_audit_checks_auditpolicy
+    run_test "Security audit has display function"   test_security_audit_has_display_fn
+    run_test "Security audit has --json flag"        test_security_audit_has_json_flag
+    run_test "Security audit has --report flag"      test_security_audit_has_report_flag
+    run_test "Security audit has --fail-on-warn"     test_security_audit_has_fail_on_warn
+    run_test "CLI vm security-audit dispatch"        test_cli_vm_security_audit_dispatch
+    run_test "CLI vm help security-audit"            test_cli_vm_help_mentions_security_audit
+
+    # --- Secure Boot check ---
+    run_test "Secure Boot check script exists"       test_sb_check_script_exists
+    run_test "Secure Boot check is executable"       test_sb_check_is_executable
+    run_test "Secure Boot check help"                test_sb_check_help
+    run_test "Secure Boot check has PS payload"      test_sb_check_has_ps_payload
+    run_test "Secure Boot check checks PK"           test_sb_check_checks_pk
+    run_test "Secure Boot check checks KEK"          test_sb_check_checks_kek
+    run_test "Secure Boot check checks DB"           test_sb_check_checks_db
+    run_test "Secure Boot check checks DBX"          test_sb_check_checks_dbx
+    run_test "Secure Boot check checks AvailableUpdates" test_sb_check_checks_available_updates
+    run_test "Secure Boot check checks boot manager" test_sb_check_checks_bootmgr
+    run_test "Secure Boot check has apply-dbx flag"  test_sb_check_has_apply_dbx
+    run_test "Secure Boot check has apply-2023 flag" test_sb_check_has_apply_2023
+    run_test "Secure Boot check has apply-revoke"    test_sb_check_has_apply_revocations
+    run_test "Secure Boot check has display function" test_sb_check_has_display_fn
+    run_test "Secure Boot check has --json flag"     test_sb_check_has_json_flag
+    run_test "CLI vm secure-boot dispatch"           test_cli_vm_secure_boot_dispatch
+    run_test "CLI vm help secure-boot"               test_cli_vm_help_mentions_secure_boot
+
+    # --- setup-guest.sh integration ---
+    run_test "Guest setup --security-audit flag"     test_guest_setup_has_security_audit_flag
+    run_test "Guest setup --secure-boot-check flag"  test_guest_setup_has_sb_check_flag
+    run_test "Guest setup --all runs audits"         test_guest_setup_all_runs_audits
+    run_test "Guest setup calls security-audit"      test_guest_setup_calls_security_audit
+    run_test "Guest setup calls secure-boot-check"   test_guest_setup_calls_sb_check
+    run_test "Guest setup has WinBtrfs status check" test_guest_setup_has_winbtrfs_status
 }
 
 run_lint() {

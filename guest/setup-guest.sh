@@ -8,13 +8,15 @@
 #   setup-guest.sh [options]
 #
 # Options:
-#   --vm NAME             Target VM (default: $IWT_VM_NAME)
-#   --install-winfsp      Install WinFsp for filesystem passthrough
-#   --install-virtio      Install VirtIO guest tools (balloon, serial, QEMU agent)
-#   --install-winbtrfs    Install WinBtrfs driver (enables Btrfs volumes in guest)
-#   --all                 Install everything
-#   --check               Only check status, don't install anything
-#   --help                Show this help
+#   --vm NAME               Target VM (default: $IWT_VM_NAME)
+#   --install-winfsp        Install WinFsp for filesystem passthrough
+#   --install-virtio        Install VirtIO guest tools (balloon, serial, QEMU agent)
+#   --install-winbtrfs      Install WinBtrfs driver (enables Btrfs volumes in guest)
+#   --security-audit        Run Windows security audit after setup
+#   --secure-boot-check     Run UEFI Secure Boot variable audit after setup
+#   --all                   Install everything and run all checks
+#   --check                 Only check status, don't install anything
+#   --help                  Show this help
 
 set -euo pipefail
 
@@ -27,6 +29,8 @@ load_config
 INSTALL_WINFSP=false
 INSTALL_VIRTIO=false
 INSTALL_WINBTRFS=false
+RUN_SECURITY_AUDIT=false
+RUN_SB_CHECK=false
 CHECK_ONLY=false
 
 # --- Argument parsing ---
@@ -34,12 +38,17 @@ CHECK_ONLY=false
 parse_args() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            --vm)                IWT_VM_NAME="$2"; shift 2 ;;
-            --install-winfsp)    INSTALL_WINFSP=true; shift ;;
-            --install-virtio)    INSTALL_VIRTIO=true; shift ;;
-            --install-winbtrfs)  INSTALL_WINBTRFS=true; shift ;;
-            --all)               INSTALL_WINFSP=true; INSTALL_VIRTIO=true; INSTALL_WINBTRFS=true; shift ;;
-            --check)             CHECK_ONLY=true; shift ;;
+            --vm)                 IWT_VM_NAME="$2"; shift 2 ;;
+            --install-winfsp)     INSTALL_WINFSP=true; shift ;;
+            --install-virtio)     INSTALL_VIRTIO=true; shift ;;
+            --install-winbtrfs)   INSTALL_WINBTRFS=true; shift ;;
+            --security-audit)     RUN_SECURITY_AUDIT=true; shift ;;
+            --secure-boot-check)  RUN_SB_CHECK=true; shift ;;
+            --all)
+                INSTALL_WINFSP=true; INSTALL_VIRTIO=true; INSTALL_WINBTRFS=true
+                RUN_SECURITY_AUDIT=true; RUN_SB_CHECK=true
+                shift ;;
+            --check)              CHECK_ONLY=true; shift ;;
             --help|-h)
                 sed -n '/^# Usage:/,/^[^#]/p' "$0" | grep '^#' | sed 's/^# \?//'
                 exit 0
@@ -49,7 +58,9 @@ parse_args() {
     done
 
     # Default to --all if no specific component requested
-    if [[ "$INSTALL_WINFSP" == false && "$INSTALL_VIRTIO" == false && "$INSTALL_WINBTRFS" == false && "$CHECK_ONLY" == false ]]; then
+    if [[ "$INSTALL_WINFSP" == false && "$INSTALL_VIRTIO" == false && \
+          "$INSTALL_WINBTRFS" == false && "$RUN_SECURITY_AUDIT" == false && \
+          "$RUN_SB_CHECK" == false && "$CHECK_ONLY" == false ]]; then
         INSTALL_WINFSP=true
         INSTALL_VIRTIO=true
         INSTALL_WINBTRFS=true
@@ -144,7 +155,7 @@ display_status() {
     check_field "WinFspService" "WinFsp Launcher"
     check_field "VirtioFS" "VirtIO-FS Driver"
     check_field "VirtioFSService" "VirtIO-FS Service"
-    check_field "WinBtrfs" "WinBtrfs Driver"
+    check_field "WinBtrfs"        "WinBtrfs Driver"
     check_field "WinBtrfsService" "WinBtrfs Service"
 }
 
@@ -257,6 +268,17 @@ main() {
 
     echo ""
     ok "Guest setup complete"
+
+    # Optional post-setup audits
+    if [[ "$RUN_SECURITY_AUDIT" == true ]]; then
+        echo ""
+        "$SCRIPT_DIR/setup-security-audit.sh" --vm "$IWT_VM_NAME"
+    fi
+
+    if [[ "$RUN_SB_CHECK" == true ]]; then
+        echo ""
+        "$SCRIPT_DIR/setup-secure-boot-check.sh" --vm "$IWT_VM_NAME"
+    fi
 }
 
 main "$@"

@@ -406,6 +406,12 @@ cmd_vm() {
         harden)
             exec "$IWT_ROOT/security/harden-vm.sh" "$@"
             ;;
+        security-audit)
+            exec "$IWT_ROOT/guest/setup-security-audit.sh" "$@"
+            ;;
+        secure-boot)
+            exec "$IWT_ROOT/guest/setup-secure-boot-check.sh" "$@"
+            ;;
         help|--help|-h)
             cat <<EOF
 iwt vm - Manage Windows VMs
@@ -426,6 +432,8 @@ Subcommands:
   first-boot [opts]   Run first-boot PowerShell scripts in a VM
   monitor <action>    VM resource monitoring and stats
   harden [opts]       Security hardening (Secure Boot, TPM, isolation)
+  security-audit      Run Windows security posture audit inside the VM
+  secure-boot         Audit UEFI Secure Boot variables inside the VM
   snapshot <action>   Manage VM snapshots
   share <action>      Manage shared folders
   gpu <action>        Manage GPU passthrough
@@ -440,12 +448,27 @@ Create options:
   --disk PATH         Path to QCOW2 disk image
 
 Setup-guest options:
-  --all                 Install everything (default)
+  --all                 Install everything and run all checks (default)
   --install-winfsp      Install WinFsp only
   --install-virtio      Install VirtIO guest tools only
   --install-winbtrfs    Install WinBtrfs driver only
+  --security-audit      Run security audit after setup
+  --secure-boot-check   Run Secure Boot variable audit after setup
   --check               Only check status, don't install
   --vm NAME             Target VM
+
+Security-audit options:
+  --vm NAME             Target VM
+  --report FILE         Save JSON report to FILE
+  --json                Output raw JSON
+  --fail-on-warn        Exit 1 on any warnings (useful in CI)
+
+Secure-boot options:
+  --vm NAME             Target VM
+  --apply-dbx-update    Apply pending DBX updates
+  --apply-2023-certs    Apply 2023 KEK/DB certificate updates
+  --apply-revocations   Apply DBX + revoke Windows Production PCA 2011
+  --report FILE         Save JSON report to FILE
 
 Example:
   iwt vm create --template gaming --name my-gaming-vm
@@ -1600,7 +1623,7 @@ _iwt_completions() {
             COMPREPLY=($(compgen -W "download build drivers pack unpack list help" -- "$cur"))
             ;;
         vm)
-            COMPREPLY=($(compgen -W "create start stop status list rdp snapshot share gpu usb net setup-guest storage template backup export import first-boot monitor harden help" -- "$cur"))
+            COMPREPLY=($(compgen -W "create start stop status list rdp snapshot share gpu usb net setup-guest storage template backup export import first-boot monitor harden security-audit secure-boot help" -- "$cur"))
             ;;
         profiles)
             COMPREPLY=($(compgen -W "install list show diff help" -- "$cur"))
@@ -1635,7 +1658,7 @@ _iwt() {
         args)
             case $words[1] in
                 image)     _values 'subcommand' download build drivers pack unpack list help ;;
-                vm)        _values 'subcommand' create start stop status list rdp snapshot share gpu usb net setup-guest storage template backup export import first-boot monitor harden help ;;
+                vm)        _values 'subcommand' create start stop status list rdp snapshot share gpu usb net setup-guest storage template backup export import first-boot monitor harden security-audit secure-boot help ;;
                 profiles)  _values 'subcommand' install list show diff help ;;
                 remoteapp) _values 'subcommand' launch install discover config help ;;
                 config)    _values 'subcommand' init show edit path help ;;
