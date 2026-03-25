@@ -1,0 +1,30 @@
+name: Mirror to OpenOS-Project-OSP
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["**"]
+  schedule:
+    # Hourly sync to catch any missed push events
+    - cron: "0 * * * *"
+  workflow_dispatch:
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Push mirror to OpenOS-Project-OSP
+        run: |
+          git remote add mirror \
+            "https://x-access-token:${{ secrets.MIRROR_TOKEN }}@github.com/OpenOS-Project-OSP/incus-windows-toolkit.git"
+
+          # Mirror all branches
+          git push mirror --all --force
+
+          # Mirror all tags
+          git push mirror --tags --force
