@@ -115,6 +115,43 @@ suggest_install() {
         fusermount|fusermount3)
             pkg="fuse (Debian/Ubuntu) or fuse3 (Fedora/RHEL)"
             ;;
+        mkfs.erofs|dump.erofs|erofsfuse)
+            pkg="erofs-utils"
+            note="See https://github.com/erofs/erofs-utils"
+            ;;
+        fuse-overlayfs)
+            pkg="fuse-overlayfs"
+            note="See https://github.com/containers/fuse-overlayfs"
+            ;;
+        embiggen-disk)
+            pkg="embiggen-disk (shell script)"
+            note="See https://github.com/nicowillis/embiggen-disk"
+            ;;
+        veritysetup)
+            pkg="cryptsetup-bin (Debian/Ubuntu) or cryptsetup (Fedora/RHEL)"
+            ;;
+        go-dmverity)
+            pkg="go-dmverity (Go)"
+            note="Install: go install github.com/anatol/go-dmverity/cmd/go-dmverity@latest"
+            ;;
+        mksquashfs)
+            pkg="squashfs-tools"
+            ;;
+        mkosi)
+            pkg="mkosi"
+            note="See https://github.com/systemd/mkosi"
+            ;;
+        partitionfs|partsfs)
+            pkg="partitionfs (FUSE)"
+            note="See https://github.com/nicowillis/partitionfs"
+            ;;
+        serviceman)
+            pkg="serviceman"
+            note="See https://github.com/nicowillis/serviceman"
+            ;;
+        x86_64-w64-mingw32-gcc)
+            pkg="gcc-mingw-w64-x86-64 (Debian/Ubuntu) or mingw64-gcc (Fedora/RHEL)"
+            ;;
         unzip)
             pkg="unzip"
             ;;
@@ -155,6 +192,57 @@ btrfs_ensure_subvol() {
         return 0  # already a subvolume
     fi
     sudo btrfs subvolume create "$path"
+}
+
+# --- EROFS helpers ---
+
+check_erofs_host() {
+    command -v mkfs.erofs &>/dev/null && command -v dump.erofs &>/dev/null
+}
+
+check_erofs_kernel() {
+    grep -q erofs /proc/filesystems 2>/dev/null
+}
+
+# --- fuse-overlayfs helpers ---
+
+check_fuse_overlayfs_host() {
+    command -v fuse-overlayfs &>/dev/null
+}
+
+# --- dm-verity helpers ---
+
+check_verity_host() {
+    command -v veritysetup &>/dev/null
+}
+
+# --- VM disk path helper ---
+
+# Returns the path to a VM's primary disk image.
+# Works with both Incus-managed and standalone images.
+# Usage: iwt_get_disk_path VM_NAME
+iwt_get_disk_path() {
+    local vm="$1"
+    # Try Incus storage pool path
+    if command -v incus &>/dev/null; then
+        local pool
+        pool=$(incus config get "$vm" volatile.pool 2>/dev/null || \
+               incus storage list --format csv 2>/dev/null | head -1 | cut -d, -f1 || \
+               echo "${IWT_STORAGE_POOL:-iwt-btrfs}")
+        local pool_path
+        pool_path=$(incus storage get "$pool" source 2>/dev/null || echo "")
+        if [[ -n "$pool_path" ]]; then
+            local disk="$pool_path/virtual-machines/$vm/disk.qcow2"
+            [[ -f "$disk" ]] && echo "$disk" && return 0
+        fi
+    fi
+    # Fallback: check common locations
+    for candidate in \
+        "${IWT_POOL_DIR:-/var/lib/iwt/pool}/vms/${vm}.qcow2" \
+        "${HOME}/.local/share/iwt/vms/${vm}.qcow2"; do
+        [[ -f "$candidate" ]] && echo "$candidate" && return 0
+    done
+    return 1
 }
 
 # --- DwarFS host helpers ---

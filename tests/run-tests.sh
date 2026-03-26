@@ -1716,7 +1716,234 @@ run_unit_tests() {
     run_test "Guest setup calls security-audit"      test_guest_setup_calls_security_audit
     run_test "Guest setup calls secure-boot-check"   test_guest_setup_calls_sb_check
     run_test "Guest setup has WinBtrfs status check" test_guest_setup_has_winbtrfs_status
+
+    # --- Phase 2: Storage (EROFS, fuse-overlayfs, embiggen-disk) ---
+    run_test "EROFS script exists"                   test_erofs_script_exists
+    run_test "EROFS script executable"               test_erofs_script_executable
+    run_test "EROFS script has --check flag"         test_erofs_has_check_flag
+    run_test "EROFS script has --pack flag"          test_erofs_has_pack_flag
+    run_test "EROFS script has --mount flag"         test_erofs_has_mount_flag
+    run_test "EROFS uses mkfs.erofs"                 test_erofs_uses_mkfs_erofs
+    run_test "fuse-overlayfs script exists"          test_fuse_overlayfs_script_exists
+    run_test "fuse-overlayfs script executable"      test_fuse_overlayfs_script_executable
+    run_test "fuse-overlayfs has --create flag"      test_fuse_overlayfs_has_create_flag
+    run_test "fuse-overlayfs has --mount flag"       test_fuse_overlayfs_has_mount_flag
+    run_test "fuse-overlayfs has --commit flag"      test_fuse_overlayfs_has_commit_flag
+    run_test "embiggen-disk script exists"           test_embiggen_script_exists
+    run_test "embiggen-disk script executable"       test_embiggen_script_executable
+    run_test "embiggen-disk has --resize flag"       test_embiggen_has_resize_flag
+    run_test "CLI vm storage erofs subcommands"      test_cli_storage_erofs_dispatch
+    run_test "CLI vm storage overlay subcommands"    test_cli_storage_overlay_dispatch
+    run_test "CLI disk subcommand exists"            test_cli_disk_subcommand
+    run_test "lib.sh has check_erofs_host"           test_lib_has_check_erofs_host
+    run_test "lib.sh has check_fuse_overlayfs_host"  test_lib_has_check_fuse_overlayfs_host
+    run_test "lib.sh has check_verity_host"          test_lib_has_check_verity_host
+    run_test "lib.sh has iwt_get_disk_path"          test_lib_has_iwt_get_disk_path
+
+    # --- Phase 3: Integrity (dm-verity, verity-squash-root) ---
+    run_test "verity script exists"                  test_verity_script_exists
+    run_test "verity script executable"              test_verity_script_executable
+    run_test "verity has --sign flag"                test_verity_has_sign_flag
+    run_test "verity has --verify flag"              test_verity_has_verify_flag
+    run_test "verity has --mount flag"               test_verity_has_mount_flag
+    run_test "verity has --append flag"              test_verity_has_append_flag
+    run_test "verity uses veritysetup"               test_verity_uses_veritysetup
+    run_test "verity-squash-root script exists"      test_vsr_script_exists
+    run_test "verity-squash-root script executable"  test_vsr_script_executable
+    run_test "verity-squash-root has --build flag"   test_vsr_has_build_flag
+    run_test "verity-squash-root uses mksquashfs"    test_vsr_uses_mksquashfs
+    run_test "CLI vm storage verity subcommands"     test_cli_storage_verity_dispatch
+    run_test "CLI rescue subcommand exists"          test_cli_rescue_subcommand
+    run_test "CLI rescue uki-build dispatch"         test_cli_rescue_uki_dispatch
+
+    # --- Phase 4: Guest services (SvcGuest, serviceman, SrvLib) ---
+    run_test "SvcGuest script exists"                test_svcguest_script_exists
+    run_test "SvcGuest script executable"            test_svcguest_script_executable
+    run_test "SvcGuest has --install flag"           test_svcguest_has_install_flag
+    run_test "SvcGuest has --inject flag"            test_svcguest_has_inject_flag
+    run_test "serviceman script exists"              test_serviceman_script_exists
+    run_test "serviceman script executable"          test_serviceman_script_executable
+    run_test "serviceman has --add flag"             test_serviceman_has_add_flag
+    run_test "serviceman has --install flag"         test_serviceman_has_install_flag
+    run_test "SrvLib script exists"                  test_srvlib_script_exists
+    run_test "SrvLib script executable"              test_srvlib_script_executable
+    run_test "SrvLib has --build flag"               test_srvlib_has_build_flag
+    run_test "SrvLib has --inject flag"              test_srvlib_has_inject_flag
+    run_test "SrvLib has iwt-agent target"           test_srvlib_has_iwt_agent_target
+    run_test "CLI guest subcommand exists"           test_cli_guest_subcommand
+    run_test "CLI guest svcguest dispatch"           test_cli_guest_svcguest_dispatch
+    run_test "CLI guest serviceman dispatch"         test_cli_guest_serviceman_dispatch
+    run_test "CLI guest srvlib dispatch"             test_cli_guest_srvlib_dispatch
+
+    # --- Phase 5: Recovery (Buildroot) ---
+    run_test "Buildroot script exists"               test_buildroot_script_exists
+    run_test "Buildroot script executable"           test_buildroot_script_executable
+    run_test "Buildroot has --check flag"            test_buildroot_has_check_flag
+    run_test "Buildroot has --configure flag"        test_buildroot_has_configure_flag
+    run_test "Buildroot has --build flag"            test_buildroot_has_build_flag
+    run_test "Buildroot has --inject flag"           test_buildroot_has_inject_flag
+    run_test "Buildroot defconfig has btrfs-progs"   test_buildroot_defconfig_has_btrfs
+    run_test "Buildroot defconfig has cryptsetup"    test_buildroot_defconfig_has_cryptsetup
+    run_test "CLI rescue check dispatch"             test_cli_rescue_check_dispatch
+    run_test "CLI rescue build dispatch"             test_cli_rescue_build_dispatch
+
+    # --- Phase 1: Image pipeline (mkosi, UEFI-GPT, partitionfs, partymix) ---
+    run_test "mkosi script exists"                   test_mkosi_script_exists
+    run_test "mkosi script executable"               test_mkosi_script_executable
+    run_test "mkosi has --check flag"                test_mkosi_has_check_flag
+    run_test "mkosi has --build flag"                test_mkosi_has_build_flag
+    run_test "mkosi generates mkosi.conf"            test_mkosi_generates_conf
+    run_test "UEFI-GPT script exists"                test_uefi_gpt_script_exists
+    run_test "UEFI-GPT script executable"            test_uefi_gpt_script_executable
+    run_test "UEFI-GPT has --build flag"             test_uefi_gpt_has_build_flag
+    run_test "partitionfs script exists"             test_partitionfs_script_exists
+    run_test "partitionfs script executable"         test_partitionfs_script_executable
+    run_test "partitionfs has --mount flag"          test_partitionfs_has_mount_flag
+    run_test "partitionfs has --inject flag"         test_partitionfs_has_inject_flag
+    run_test "partymix script exists"                test_partymix_script_exists
+    run_test "partymix script executable"            test_partymix_script_executable
+    run_test "partymix has --assemble flag"          test_partymix_has_assemble_flag
+
+    # --- lib.sh new suggest_install entries ---
+    run_test "lib.sh suggest_install erofs-utils"    test_lib_suggest_install_erofs
+    run_test "lib.sh suggest_install fuse-overlayfs" test_lib_suggest_install_fuse_overlayfs
+    run_test "lib.sh suggest_install veritysetup"    test_lib_suggest_install_veritysetup
+    run_test "lib.sh suggest_install mkosi"          test_lib_suggest_install_mkosi
 }
+
+# --- Phase 2 test functions ---
+
+test_erofs_script_exists()          { [[ -f "$IWT_ROOT/storage/setup-erofs.sh" ]]; }
+test_erofs_script_executable()      { [[ -x "$IWT_ROOT/storage/setup-erofs.sh" ]]; }
+test_erofs_has_check_flag()         { grep -q -- '--check' "$IWT_ROOT/storage/setup-erofs.sh"; }
+test_erofs_has_pack_flag()          { grep -q -- '--pack' "$IWT_ROOT/storage/setup-erofs.sh"; }
+test_erofs_has_mount_flag()         { grep -q -- '--mount' "$IWT_ROOT/storage/setup-erofs.sh"; }
+test_erofs_uses_mkfs_erofs()        { grep -q 'mkfs.erofs' "$IWT_ROOT/storage/setup-erofs.sh"; }
+
+test_fuse_overlayfs_script_exists()    { [[ -f "$IWT_ROOT/storage/setup-fuse-overlayfs.sh" ]]; }
+test_fuse_overlayfs_script_executable(){ [[ -x "$IWT_ROOT/storage/setup-fuse-overlayfs.sh" ]]; }
+test_fuse_overlayfs_has_create_flag()  { grep -q -- '--create' "$IWT_ROOT/storage/setup-fuse-overlayfs.sh"; }
+test_fuse_overlayfs_has_mount_flag()   { grep -q -- '--mount' "$IWT_ROOT/storage/setup-fuse-overlayfs.sh"; }
+test_fuse_overlayfs_has_commit_flag()  { grep -q -- '--commit' "$IWT_ROOT/storage/setup-fuse-overlayfs.sh"; }
+
+test_embiggen_script_exists()       { [[ -f "$IWT_ROOT/storage/setup-embiggen-disk.sh" ]]; }
+test_embiggen_script_executable()   { [[ -x "$IWT_ROOT/storage/setup-embiggen-disk.sh" ]]; }
+test_embiggen_has_resize_flag()     { grep -q -- '--resize' "$IWT_ROOT/storage/setup-embiggen-disk.sh"; }
+
+test_cli_storage_erofs_dispatch() {
+    grep -q 'erofs-pack' "$IWT_ROOT/cli/iwt.sh"
+    grep -q 'setup-erofs.sh' "$IWT_ROOT/cli/iwt.sh"
+}
+test_cli_storage_overlay_dispatch() {
+    grep -q 'overlay-create' "$IWT_ROOT/cli/iwt.sh"
+    grep -q 'setup-fuse-overlayfs.sh' "$IWT_ROOT/cli/iwt.sh"
+}
+test_cli_disk_subcommand() {
+    "$IWT_ROOT/cli/iwt.sh" disk --help 2>&1 | grep -q 'resize'
+}
+
+test_lib_has_check_erofs_host()         { grep -q 'check_erofs_host()' "$IWT_ROOT/cli/lib.sh"; }
+test_lib_has_check_fuse_overlayfs_host(){ grep -q 'check_fuse_overlayfs_host()' "$IWT_ROOT/cli/lib.sh"; }
+test_lib_has_check_verity_host()        { grep -q 'check_verity_host()' "$IWT_ROOT/cli/lib.sh"; }
+test_lib_has_iwt_get_disk_path()        { grep -q 'iwt_get_disk_path()' "$IWT_ROOT/cli/lib.sh"; }
+
+# --- Phase 3 test functions ---
+
+test_verity_script_exists()         { [[ -f "$IWT_ROOT/storage/setup-verity.sh" ]]; }
+test_verity_script_executable()     { [[ -x "$IWT_ROOT/storage/setup-verity.sh" ]]; }
+test_verity_has_sign_flag()         { grep -q -- '--sign' "$IWT_ROOT/storage/setup-verity.sh"; }
+test_verity_has_verify_flag()       { grep -q -- '--verify' "$IWT_ROOT/storage/setup-verity.sh"; }
+test_verity_has_mount_flag()        { grep -q -- '--mount' "$IWT_ROOT/storage/setup-verity.sh"; }
+test_verity_has_append_flag()       { grep -q -- '--append' "$IWT_ROOT/storage/setup-verity.sh"; }
+test_verity_uses_veritysetup()      { grep -q 'veritysetup' "$IWT_ROOT/storage/setup-verity.sh"; }
+
+test_vsr_script_exists()            { [[ -f "$IWT_ROOT/storage/setup-verity-squash-root.sh" ]]; }
+test_vsr_script_executable()        { [[ -x "$IWT_ROOT/storage/setup-verity-squash-root.sh" ]]; }
+test_vsr_has_build_flag()           { grep -q -- '--build' "$IWT_ROOT/storage/setup-verity-squash-root.sh"; }
+test_vsr_uses_mksquashfs()          { grep -q 'mksquashfs' "$IWT_ROOT/storage/setup-verity-squash-root.sh"; }
+
+test_cli_storage_verity_dispatch() {
+    grep -q 'verity-sign' "$IWT_ROOT/cli/iwt.sh"
+    grep -q 'setup-verity.sh' "$IWT_ROOT/cli/iwt.sh"
+}
+test_cli_rescue_subcommand() {
+    "$IWT_ROOT/cli/iwt.sh" rescue --help 2>&1 | grep -q 'build'
+}
+test_cli_rescue_uki_dispatch() {
+    grep -q 'uki-build' "$IWT_ROOT/cli/iwt.sh"
+    grep -q 'setup-verity-squash-root.sh' "$IWT_ROOT/cli/iwt.sh"
+}
+
+# --- Phase 4 test functions ---
+
+test_svcguest_script_exists()       { [[ -f "$IWT_ROOT/guest/setup-svcguest.sh" ]]; }
+test_svcguest_script_executable()   { [[ -x "$IWT_ROOT/guest/setup-svcguest.sh" ]]; }
+test_svcguest_has_install_flag()    { grep -q -- '--install' "$IWT_ROOT/guest/setup-svcguest.sh"; }
+test_svcguest_has_inject_flag()     { grep -q -- '--inject' "$IWT_ROOT/guest/setup-svcguest.sh"; }
+
+test_serviceman_script_exists()     { [[ -f "$IWT_ROOT/guest/setup-serviceman.sh" ]]; }
+test_serviceman_script_executable() { [[ -x "$IWT_ROOT/guest/setup-serviceman.sh" ]]; }
+test_serviceman_has_add_flag()      { grep -q -- '--add' "$IWT_ROOT/guest/setup-serviceman.sh"; }
+test_serviceman_has_install_flag()  { grep -q -- '--install' "$IWT_ROOT/guest/setup-serviceman.sh"; }
+
+test_srvlib_script_exists()         { [[ -f "$IWT_ROOT/guest/setup-srvlib.sh" ]]; }
+test_srvlib_script_executable()     { [[ -x "$IWT_ROOT/guest/setup-srvlib.sh" ]]; }
+test_srvlib_has_build_flag()        { grep -q -- '--build' "$IWT_ROOT/guest/setup-srvlib.sh"; }
+test_srvlib_has_inject_flag()       { grep -q -- '--inject' "$IWT_ROOT/guest/setup-srvlib.sh"; }
+test_srvlib_has_iwt_agent_target()  { grep -q 'iwt-agent' "$IWT_ROOT/guest/setup-srvlib.sh"; }
+
+test_cli_guest_subcommand() {
+    "$IWT_ROOT/cli/iwt.sh" guest --help 2>&1 | grep -q 'svcguest'
+}
+test_cli_guest_svcguest_dispatch()  { grep -q 'setup-svcguest.sh' "$IWT_ROOT/cli/iwt.sh"; }
+test_cli_guest_serviceman_dispatch(){ grep -q 'setup-serviceman.sh' "$IWT_ROOT/cli/iwt.sh"; }
+test_cli_guest_srvlib_dispatch()    { grep -q 'setup-srvlib.sh' "$IWT_ROOT/cli/iwt.sh"; }
+
+# --- Phase 5 test functions ---
+
+test_buildroot_script_exists()      { [[ -f "$IWT_ROOT/image-pipeline/scripts/setup-buildroot.sh" ]]; }
+test_buildroot_script_executable()  { [[ -x "$IWT_ROOT/image-pipeline/scripts/setup-buildroot.sh" ]]; }
+test_buildroot_has_check_flag()     { grep -q -- '--check' "$IWT_ROOT/image-pipeline/scripts/setup-buildroot.sh"; }
+test_buildroot_has_configure_flag() { grep -q -- '--configure' "$IWT_ROOT/image-pipeline/scripts/setup-buildroot.sh"; }
+test_buildroot_has_build_flag()     { grep -q -- '--build' "$IWT_ROOT/image-pipeline/scripts/setup-buildroot.sh"; }
+test_buildroot_has_inject_flag()    { grep -q -- '--inject' "$IWT_ROOT/image-pipeline/scripts/setup-buildroot.sh"; }
+test_buildroot_defconfig_has_btrfs()    { grep -q 'BR2_PACKAGE_BTRFS_PROGS=y' "$IWT_ROOT/image-pipeline/scripts/setup-buildroot.sh"; }
+test_buildroot_defconfig_has_cryptsetup(){ grep -q 'BR2_PACKAGE_CRYPTSETUP=y' "$IWT_ROOT/image-pipeline/scripts/setup-buildroot.sh"; }
+
+test_cli_rescue_check_dispatch() {
+    grep -q 'setup-buildroot.sh.*--check' "$IWT_ROOT/cli/iwt.sh"
+}
+test_cli_rescue_build_dispatch() {
+    grep -q 'setup-buildroot.sh.*--build' "$IWT_ROOT/cli/iwt.sh"
+}
+
+# --- Phase 1 test functions ---
+
+test_mkosi_script_exists()          { [[ -f "$IWT_ROOT/image-pipeline/scripts/setup-mkosi.sh" ]]; }
+test_mkosi_script_executable()      { [[ -x "$IWT_ROOT/image-pipeline/scripts/setup-mkosi.sh" ]]; }
+test_mkosi_has_check_flag()         { grep -q -- '--check' "$IWT_ROOT/image-pipeline/scripts/setup-mkosi.sh"; }
+test_mkosi_has_build_flag()         { grep -q -- '--build' "$IWT_ROOT/image-pipeline/scripts/setup-mkosi.sh"; }
+test_mkosi_generates_conf()         { grep -q 'mkosi.conf' "$IWT_ROOT/image-pipeline/scripts/setup-mkosi.sh"; }
+
+test_uefi_gpt_script_exists()       { [[ -f "$IWT_ROOT/image-pipeline/scripts/setup-uefi-gpt-image.sh" ]]; }
+test_uefi_gpt_script_executable()   { [[ -x "$IWT_ROOT/image-pipeline/scripts/setup-uefi-gpt-image.sh" ]]; }
+test_uefi_gpt_has_build_flag()      { grep -q -- '--install' "$IWT_ROOT/image-pipeline/scripts/setup-uefi-gpt-image.sh"; }
+
+test_partitionfs_script_exists()    { [[ -f "$IWT_ROOT/image-pipeline/scripts/setup-partitionfs.sh" ]]; }
+test_partitionfs_script_executable(){ [[ -x "$IWT_ROOT/image-pipeline/scripts/setup-partitionfs.sh" ]]; }
+test_partitionfs_has_mount_flag()   { grep -q -- '--mount' "$IWT_ROOT/image-pipeline/scripts/setup-partitionfs.sh"; }
+test_partitionfs_has_inject_flag()  { grep -q -- '--inject' "$IWT_ROOT/image-pipeline/scripts/setup-partitionfs.sh"; }
+
+test_partymix_script_exists()       { [[ -f "$IWT_ROOT/image-pipeline/scripts/setup-partymix.sh" ]]; }
+test_partymix_script_executable()   { [[ -x "$IWT_ROOT/image-pipeline/scripts/setup-partymix.sh" ]]; }
+test_partymix_has_assemble_flag()   { grep -q -- '--assemble' "$IWT_ROOT/image-pipeline/scripts/setup-partymix.sh"; }
+
+# --- lib.sh new suggest_install entries ---
+
+test_lib_suggest_install_erofs()         { grep -q 'erofs-utils' "$IWT_ROOT/cli/lib.sh"; }
+test_lib_suggest_install_fuse_overlayfs(){ grep -q 'fuse-overlayfs' "$IWT_ROOT/cli/lib.sh"; }
+test_lib_suggest_install_veritysetup()   { grep -q 'cryptsetup-bin' "$IWT_ROOT/cli/lib.sh"; }
+test_lib_suggest_install_mkosi()         { grep -q 'mkosi' "$IWT_ROOT/cli/lib.sh"; }
 
 run_lint() {
     bold "Lint"

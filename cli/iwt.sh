@@ -39,6 +39,9 @@ Usage: iwt <command> [subcommand] [options]
 Commands:
   image       Build, pack, and manage Windows VM images
   vm          Create, start, stop, and manage Windows VMs
+  disk        Live disk image resize (embiggen-disk)
+  rescue      Build and inject Buildroot rescue environments
+  guest       Guest tool management (SvcGuest, serviceman, SrvLib)
   apps        Windows app store (install app bundles via winget)
   cloud       Sync backups to cloud storage (S3, B2, rclone)
   fleet       Multi-VM orchestration (start-all, stop-all, backup-all)
@@ -171,6 +174,83 @@ cmd_doctor() {
         err "  FUSE not available (needed for DwarFS share mounts)"
         fail_count=$((fail_count + 1))
         failed_cmds+=(fusermount)
+    fi
+
+    # --- EROFS checks ---
+    echo ""
+    info "EROFS image format (IWT_IMAGE_FORMAT=${IWT_IMAGE_FORMAT:-dwarfs}):"
+    if check_erofs_host; then
+        ok "  erofs-utils (mkfs.erofs, dump.erofs)"
+        ok_count=$((ok_count + 1))
+    else
+        warn "  erofs-utils not found (optional; needed for IWT_IMAGE_FORMAT=erofs)"
+        # Not a hard failure — EROFS is optional
+    fi
+    if check_erofs_kernel; then
+        ok "  Kernel EROFS support"
+        ok_count=$((ok_count + 1))
+    else
+        warn "  Kernel EROFS not detected (erofsfuse fallback will be used)"
+    fi
+
+    # --- fuse-overlayfs checks ---
+    echo ""
+    info "Overlay storage (IWT_STORAGE_BACKEND=${IWT_STORAGE_BACKEND:-btrfs}):"
+    if check_fuse_overlayfs_host; then
+        ok "  fuse-overlayfs"
+        ok_count=$((ok_count + 1))
+    else
+        warn "  fuse-overlayfs not found (optional; needed for rootless overlay backend)"
+    fi
+
+    # --- dm-verity checks ---
+    echo ""
+    info "Image integrity (dm-verity):"
+    if check_verity_host; then
+        ok "  veritysetup (cryptsetup)"
+        ok_count=$((ok_count + 1))
+    else
+        warn "  veritysetup not found (optional; needed for --with-verity image signing)"
+    fi
+
+    # --- Guest service tools ---
+    echo ""
+    info "Guest service tools:"
+    if [[ -f "${IWT_CACHE_DIR:-$HOME/.cache/iwt}/svcguest/SvcGuest.exe" ]]; then
+        ok "  SvcGuest.exe (cached)"
+        ok_count=$((ok_count + 1))
+    else
+        warn "  SvcGuest.exe not cached (run: iwt guest svcguest --install)"
+    fi
+    if command -v serviceman &>/dev/null; then
+        ok "  serviceman"
+        ok_count=$((ok_count + 1))
+    else
+        warn "  serviceman not found (optional; run: iwt guest serviceman --install)"
+    fi
+    if command -v "${IWT_MINGW_PREFIX:-x86_64-w64-mingw32}-gcc" &>/dev/null; then
+        ok "  MinGW cross-compiler (${IWT_MINGW_PREFIX:-x86_64-w64-mingw32}-gcc)"
+        ok_count=$((ok_count + 1))
+    else
+        warn "  MinGW cross-compiler not found (optional; needed for iwt guest srvlib --build)"
+    fi
+
+    # --- Image pipeline tools ---
+    echo ""
+    info "Image pipeline tools:"
+    for tool in mkosi partitionfs partsfs; do
+        if command -v "$tool" &>/dev/null; then
+            ok "  $tool"
+            ok_count=$((ok_count + 1))
+        else
+            warn "  $tool not found (optional)"
+        fi
+    done
+    if command -v cargo &>/dev/null; then
+        ok "  cargo (for partymix)"
+        ok_count=$((ok_count + 1))
+    else
+        warn "  cargo not found (optional; needed for partymix MBR assembly)"
     fi
 
     echo ""
@@ -505,38 +585,262 @@ cmd_vm_storage() {
         dwarfs-check)
             exec "$IWT_ROOT/storage/setup-dwarfs.sh" check "$@"
             ;;
+        # EROFS subcommands
+        erofs-pack)
+            exec "$IWT_ROOT/storage/setup-erofs.sh" --pack "$@"
+            ;;
+        erofs-unpack)
+            exec "$IWT_ROOT/storage/setup-erofs.sh" --unpack "$@"
+            ;;
+        erofs-mount)
+            exec "$IWT_ROOT/storage/setup-erofs.sh" --mount "$@"
+            ;;
+        erofs-umount)
+            exec "$IWT_ROOT/storage/setup-erofs.sh" --umount "$@"
+            ;;
+        erofs-check)
+            exec "$IWT_ROOT/storage/setup-erofs.sh" --check "$@"
+            ;;
+        erofs-install)
+            exec "$IWT_ROOT/storage/setup-erofs.sh" --install "$@"
+            ;;
+        # fuse-overlayfs subcommands
+        overlay-create)
+            exec "$IWT_ROOT/storage/setup-fuse-overlayfs.sh" --create "$@"
+            ;;
+        overlay-mount)
+            exec "$IWT_ROOT/storage/setup-fuse-overlayfs.sh" --mount "$@"
+            ;;
+        overlay-umount)
+            exec "$IWT_ROOT/storage/setup-fuse-overlayfs.sh" --umount "$@"
+            ;;
+        overlay-commit)
+            exec "$IWT_ROOT/storage/setup-fuse-overlayfs.sh" --commit "$@"
+            ;;
+        overlay-status)
+            exec "$IWT_ROOT/storage/setup-fuse-overlayfs.sh" --status "$@"
+            ;;
+        overlay-check)
+            exec "$IWT_ROOT/storage/setup-fuse-overlayfs.sh" --check "$@"
+            ;;
+        # dm-verity subcommands
+        verity-sign)
+            exec "$IWT_ROOT/storage/setup-verity.sh" --sign "$@"
+            ;;
+        verity-verify)
+            exec "$IWT_ROOT/storage/setup-verity.sh" --verify "$@"
+            ;;
+        verity-mount)
+            exec "$IWT_ROOT/storage/setup-verity.sh" --mount "$@"
+            ;;
+        verity-umount)
+            exec "$IWT_ROOT/storage/setup-verity.sh" --umount "$@"
+            ;;
+        verity-info)
+            exec "$IWT_ROOT/storage/setup-verity.sh" --info "$@"
+            ;;
+        verity-check)
+            exec "$IWT_ROOT/storage/setup-verity.sh" --check "$@"
+            ;;
         help|--help|-h)
             cat <<EOF
-iwt vm storage - Manage Btrfs storage pools and DwarFS shared folders
+iwt vm storage - Manage storage pools, image formats, and integrity
 
 Btrfs subcommands:
-  create-pool     Create a Btrfs-backed Incus storage pool
-  attach-btrfs    Pass a Btrfs block device/image through to a VM
-  detach-btrfs    Remove a Btrfs block device from a VM
-  list-pools      List Incus storage pools and Btrfs status
-  check           Check host Btrfs support
+  create-pool       Create a Btrfs-backed Incus storage pool
+  attach-btrfs      Pass a Btrfs block device/image through to a VM
+  detach-btrfs      Remove a Btrfs block device from a VM
+  list-pools        List Incus storage pools and Btrfs status
+  check             Check host Btrfs support
 
 DwarFS subcommands:
-  mount-share     Mount a .dwarfs archive and expose it to a VM via virtiofs
-  umount-share    Unmount a DwarFS virtiofs share
-  list-shares     List active DwarFS mounts
-  dwarfs-check    Check host DwarFS tool availability
+  mount-share       Mount a .dwarfs archive and expose it to a VM via virtiofs
+  umount-share      Unmount a DwarFS virtiofs share
+  list-shares       List active DwarFS mounts
+  dwarfs-check      Check host DwarFS tool availability
+
+EROFS subcommands:
+  erofs-pack SRC DST    Pack directory into EROFS image
+  erofs-unpack SRC DST  Extract EROFS image to directory
+  erofs-mount IMG MNT   Mount EROFS image (kernel or erofsfuse)
+  erofs-umount MNT      Unmount EROFS image
+  erofs-check           Check erofs-utils availability
+  erofs-install         Install erofs-utils
+
+Overlay subcommands (rootless fuse-overlayfs):
+  overlay-create VM     Create overlay stack for VM
+  overlay-mount VM      Mount overlay for VM
+  overlay-umount VM     Unmount overlay for VM
+  overlay-commit VM     Flatten upper layer into base
+  overlay-status VM     Show overlay status
+  overlay-check         Check fuse-overlayfs availability
+
+dm-verity subcommands:
+  verity-sign IMG       Generate Merkle tree and root hash
+  verity-verify IMG     Verify image against stored root hash
+  verity-mount IMG MNT  Map through dm-verity and mount (requires root)
+  verity-umount MNT     Remove dm-verity mapping and unmount
+  verity-info IMG       Show root hash and tree parameters
+  verity-check          Check veritysetup availability
 
 Examples:
   iwt vm storage create-pool
-  iwt vm storage create-pool --path /mnt/btrfs
-  iwt vm storage attach-btrfs --vm win11 --device /dev/sdb
-  iwt vm storage attach-btrfs --vm win11 --device /data/shared.img --name data
-  iwt vm storage detach-btrfs --vm win11 --name data
-  iwt vm storage mount-share --archive games.dwarfs --vm win11
-  iwt vm storage umount-share --name games --vm win11
-  iwt vm storage list-shares
-  iwt vm storage check
+  iwt vm storage erofs-pack /mnt/rootfs rootfs.erofs
+  iwt vm storage verity-sign rootfs.erofs
+  iwt vm storage overlay-create win11
+  iwt vm storage overlay-mount win11
 EOF
             ;;
         *)
             err "Unknown storage subcommand: $subcmd"
             exec "$IWT_ROOT/storage/setup-btrfs-pool.sh" help
+            ;;
+    esac
+}
+
+# --- Disk subcommand ---
+
+cmd_disk() {
+    local subcmd="${1:-help}"
+    shift || true
+
+    case "$subcmd" in
+        resize)
+            exec "$IWT_ROOT/storage/setup-embiggen-disk.sh" --resize "$@"
+            ;;
+        info)
+            exec "$IWT_ROOT/storage/setup-embiggen-disk.sh" --info "$@"
+            ;;
+        check)
+            exec "$IWT_ROOT/storage/setup-embiggen-disk.sh" --check "$@"
+            ;;
+        install)
+            exec "$IWT_ROOT/storage/setup-embiggen-disk.sh" --install "$@"
+            ;;
+        help|--help|-h)
+            cat <<EOF
+iwt disk - Live disk image resize
+
+Subcommands:
+  resize IMG SIZE   Resize disk image to SIZE (e.g. 20G, +5G)
+  info IMG          Show current image and partition sizes
+  check             Check embiggen-disk availability
+  install           Install embiggen-disk
+
+Examples:
+  iwt disk resize ~/.local/share/incus/storage-pools/iwt-btrfs/virtual-machines/win11/disk.qcow2 +10G
+  iwt disk info win11.qcow2
+EOF
+            ;;
+        *)
+            err "Unknown disk subcommand: $subcmd"
+            exit 1
+            ;;
+    esac
+}
+
+# --- Rescue subcommand ---
+
+cmd_rescue() {
+    local subcmd="${1:-help}"
+    shift || true
+
+    case "$subcmd" in
+        check)
+            exec "$IWT_ROOT/image-pipeline/scripts/setup-buildroot.sh" --check "$@"
+            ;;
+        install)
+            exec "$IWT_ROOT/image-pipeline/scripts/setup-buildroot.sh" --install "$@"
+            ;;
+        configure)
+            exec "$IWT_ROOT/image-pipeline/scripts/setup-buildroot.sh" --configure "$@"
+            ;;
+        build)
+            exec "$IWT_ROOT/image-pipeline/scripts/setup-buildroot.sh" --build "$@"
+            ;;
+        inject)
+            exec "$IWT_ROOT/image-pipeline/scripts/setup-buildroot.sh" --inject "$@"
+            ;;
+        uki-build)
+            exec "$IWT_ROOT/storage/setup-verity-squash-root.sh" --build "$@"
+            ;;
+        uki-verify)
+            exec "$IWT_ROOT/storage/setup-verity-squash-root.sh" --verify "$@"
+            ;;
+        help|--help|-h)
+            cat <<EOF
+iwt rescue - Build and inject rescue environments for Windows VMs
+
+Subcommands:
+  check             Check Buildroot prerequisites
+  install           Install Buildroot and dependencies
+  configure         Generate IWT Buildroot defconfig
+  build             Build the rescue image (30-90 min first run)
+  inject VM         Attach rescue image to VM as secondary boot disk
+  uki-build SRC DST Build a verity-protected UKI from rootfs directory
+  uki-verify UKI    Verify UKI integrity
+
+Examples:
+  iwt rescue check
+  iwt rescue install
+  iwt rescue configure
+  iwt rescue build
+  iwt rescue inject win11
+  iwt rescue uki-build /mnt/rescue-rootfs rescue.efi
+EOF
+            ;;
+        *)
+            err "Unknown rescue subcommand: $subcmd"
+            exit 1
+            ;;
+    esac
+}
+
+# --- Guest tools subcommand ---
+
+cmd_guest() {
+    local subcmd="${1:-help}"
+    shift || true
+
+    case "$subcmd" in
+        svcguest)
+            exec "$IWT_ROOT/guest/setup-svcguest.sh" "$@"
+            ;;
+        serviceman)
+            exec "$IWT_ROOT/guest/setup-serviceman.sh" "$@"
+            ;;
+        srvlib)
+            exec "$IWT_ROOT/guest/setup-srvlib.sh" "$@"
+            ;;
+        winbtrfs)
+            exec "$IWT_ROOT/guest/setup-winbtrfs.sh" "$@"
+            ;;
+        winfsp)
+            exec "$IWT_ROOT/guest/setup-winfsp.sh" "$@"
+            ;;
+        help|--help|-h)
+            cat <<EOF
+iwt guest - Guest tool management
+
+Subcommands:
+  svcguest [opts]   Manage SvcGuest Windows service host
+  serviceman [opts] Manage host-side daemons via serviceman
+  srvlib [opts]     Build and inject SrvLib-based Windows agents
+  winbtrfs [opts]   Manage WinBtrfs driver
+  winfsp [opts]     Manage WinFsp driver
+
+Examples:
+  iwt guest svcguest --install
+  iwt guest svcguest --inject win11
+  iwt guest serviceman --add iwt-monitor "$IWT_ROOT/cli/monitor.sh"
+  iwt guest srvlib --install
+  iwt guest srvlib --build iwt-agent
+  iwt guest srvlib --inject win11 /tmp/iwt-build/agents/iwt-agent.exe
+EOF
+            ;;
+        *)
+            err "Unknown guest subcommand: $subcmd"
+            exit 1
             ;;
     esac
 }
@@ -1613,7 +1917,7 @@ _iwt_completions() {
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
 
-    commands="image vm profiles remoteapp doctor config version help"
+    commands="image vm disk rescue guest profiles remoteapp doctor config version help"
 
     case "$prev" in
         iwt)
@@ -1685,6 +1989,9 @@ main() {
     case "$cmd" in
         image)      cmd_image "$@" ;;
         vm)         cmd_vm "$@" ;;
+        disk)       cmd_disk "$@" ;;
+        rescue)     cmd_rescue "$@" ;;
+        guest)      cmd_guest "$@" ;;
         apps)       exec "$IWT_ROOT/guest/app-store.sh" "$@" ;;
         cloud)      exec "$IWT_ROOT/cli/cloud-sync.sh" "$@" ;;
         fleet)      exec "$IWT_ROOT/cli/fleet.sh" "$@" ;;
