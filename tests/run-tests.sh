@@ -298,15 +298,11 @@ test_tui_has_shebang() {
 }
 
 test_tui_has_main_menu() {
-    local content
-    content=$(cat "$IWT_ROOT/tui/iwt-tui.sh")
-    echo "$content" | grep -q 'menu_main'
+    grep -q 'menu_main' "$IWT_ROOT/tui/iwt-tui.sh"
 }
 
 test_tui_has_dialog_detection() {
-    local content
-    content=$(cat "$IWT_ROOT/tui/iwt-tui.sh")
-    echo "$content" | grep -q 'dialog\|whiptail'
+    grep -qE 'dialog|whiptail' "$IWT_ROOT/tui/iwt-tui.sh"
 }
 
 test_cli_help_mentions_tui() {
@@ -316,9 +312,7 @@ test_cli_help_mentions_tui() {
 }
 
 test_cli_tui_dispatch_exists() {
-    local content
-    content=$(cat "$IWT_ROOT/cli/iwt.sh")
-    echo "$content" | grep -q 'tui).*iwt-tui'
+    grep -q 'tui).*iwt-tui' "$IWT_ROOT/cli/iwt.sh"
 }
 
 # --- VirtIO driver management tests ---
