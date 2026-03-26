@@ -1147,7 +1147,9 @@ test_license_exists() {
 # --- Lint ---
 
 test_shellcheck() {
-    find "$IWT_ROOT" -name '*.sh' -exec shellcheck -x -S warning {} +
+    # SC1083: shellcheck misreads PowerShell format strings (e.g. '{0:X4}') as
+    # shell syntax. These appear in heredoc PS payloads and are intentional.
+    find "$IWT_ROOT" -name '*.sh' -exec shellcheck -x -S warning --exclude=SC1083 {} +
 }
 
 # --- Integration tests (require Incus) ---
