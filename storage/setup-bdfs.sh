@@ -1370,7 +1370,6 @@ cmd_share() {
     [[ -n "$share_name"  ]] || share_name="$(basename "$blend_mount")"
 
     _require_bdfs
-    _require_fuse
 
     echo ""
     bold "bdfs share"
@@ -1392,7 +1391,15 @@ cmd_share() {
     # Verify the VM exists
     incus info "$vm_name" &>/dev/null || die "VM '$vm_name' not found"
 
-    # Reject duplicate share names on the same VM
+    # Reject duplicate share names on the same VM (check state file first,
+    # before touching incus, so we fail fast without side effects).
+    local _existing_state="${IWT_BDFS_STATE_DIR:-/var/lib/iwt/bdfs}/shares.state"
+    if [[ -f "$_existing_state" ]] && \
+       grep -q "^[^|]*|${vm_name}|${share_name}|" "$_existing_state" 2>/dev/null; then
+        die "Share '$share_name' is already registered for VM '$vm_name'.\n  Use a different --name, or remove the existing entry first:\n  iwt vm storage bdfs-unshare --vm $vm_name --name $share_name"
+    fi
+
+    # Reject if the device name is already attached to the VM in incus.
     if incus config device show "$vm_name" 2>/dev/null | grep -q "^${share_name}:"; then
         die "Device '$share_name' is already attached to '$vm_name'. Use --name to choose a different name."
     fi
@@ -1411,13 +1418,6 @@ cmd_share() {
         || die "Failed to attach virtiofs share to VM '$vm_name'"
 
     ok "Share '$share_name' attached to '$vm_name'"
-
-    # Deduplication: reject if this vm+share combination is already registered.
-    local _existing_state="${IWT_BDFS_STATE_DIR:-/var/lib/iwt/bdfs}/shares.state"
-    if [[ -f "$_existing_state" ]] && \
-       grep -q "^[^|]*|${vm_name}|${share_name}|" "$_existing_state" 2>/dev/null; then
-        die "Share '$share_name' is already registered for VM '$vm_name'.\n  Use a different --name, or remove the existing entry first:\n  iwt vm storage bdfs-unshare --vm $vm_name --name $share_name"
-    fi
 
     # Persist state so bdfs-unshare, list-shares, and remount-all can use it.
     # shares.state lives in the persistent state dir (/var/lib/iwt/bdfs) so it

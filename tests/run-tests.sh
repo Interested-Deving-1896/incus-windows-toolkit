@@ -2500,6 +2500,41 @@ exec "$@"
 STUB
     chmod +x "${stub_dir}/sudo"
 
+    # lsmod stub: report btrfs_dwarfs as loaded
+    cat > "${stub_dir}/lsmod" <<'STUB'
+#!/usr/bin/env bash
+echo "btrfs_dwarfs           65536  0"
+STUB
+    chmod +x "${stub_dir}/lsmod"
+
+    # btrfs stub: always succeeds
+    cat > "${stub_dir}/btrfs" <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+    chmod +x "${stub_dir}/btrfs"
+
+    # mkdwarfs stub: always succeeds
+    cat > "${stub_dir}/mkdwarfs" <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+    chmod +x "${stub_dir}/mkdwarfs"
+
+    # dwarfs stub: always succeeds
+    cat > "${stub_dir}/dwarfs" <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+    chmod +x "${stub_dir}/dwarfs"
+
+    # dwarfsck stub: always succeeds
+    cat > "${stub_dir}/dwarfsck" <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+    chmod +x "${stub_dir}/dwarfsck"
+
     echo "$stub_dir"
 }
 
@@ -2581,8 +2616,11 @@ test_bdfs_integ_unshare_removes_state() {
         > "${state_dir}/shares.state"
     _bdfs_run "$stub_dir" "$state_dir" unshare \
         --vm test-vm --name my-share > /dev/null 2>&1
-    local remaining
-    remaining=$(grep -c "my-share" "${state_dir}/shares.state" 2>/dev/null || echo 0)
+    # grep -c returns 0 (no match) or 1+ (match found); file may be empty after unshare
+    local remaining=0
+    if [[ -f "${state_dir}/shares.state" ]]; then
+        remaining=$(grep -c "my-share" "${state_dir}/shares.state" 2>/dev/null) || remaining=0
+    fi
     _bdfs_stub_teardown "$stub_dir" "$state_dir"
     [[ "$remaining" -eq 0 ]]
 }
