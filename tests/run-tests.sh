@@ -1004,17 +1004,23 @@ test_bdfs_install_units_generates_service() {
 
 test_bdfs_install_units_help_flag() {
     # --help must exit 0 and print usage, not fall through to die
-    "$IWT_ROOT/storage/setup-bdfs.sh" install-units --help 2>&1 | grep -q 'install\|uninstall\|status'
+    local output rc
+    output=$("$IWT_ROOT/storage/setup-bdfs.sh" install-units --help 2>&1)
+    rc=$?
+    [[ $rc -eq 0 ]] && echo "$output" | grep -q 'install\|uninstall\|status'
 }
 
 test_bdfs_install_blend_template_delegates() {
     # _install_blend_mount_template must delegate to cmd_install_blend_template
-    # rather than containing its own copy of the unit content
-    grep -q 'cmd_install_blend_template' "$IWT_ROOT/storage/setup-bdfs.sh"
-    # Confirm there is only ONE copy of the ExecStart bash -c line (in cmd_install_blend_template)
-    local count
-    count=$(grep -c "ExecStart=.*bash.*args=.*BDFS_BTRFS_UUID" "$IWT_ROOT/storage/setup-bdfs.sh" || true)
-    [[ "$count" -eq 1 ]]
+    # rather than containing its own copy of the unit content.
+    # Extract the function body and confirm it calls cmd_install_blend_template
+    # and does NOT contain its own ExecStart line.
+    local body
+    body=$(awk '/^_install_blend_mount_template\(\)/,/^}/' \
+        "$IWT_ROOT/storage/setup-bdfs.sh")
+    echo "$body" | grep -q 'cmd_install_blend_template' || return 1
+    # Must NOT contain a duplicate ExecStart bash -c block
+    ! echo "$body" | grep -q 'ExecStart'
 }
 
 test_bdfs_status_shows_blend_namespaces() {
@@ -2672,6 +2678,28 @@ test_bdfs_integ_remount_all_dry_run() {
     [[ $rc -eq 0 ]] && echo "$output" | grep -qi 'dry.run\|dry_run\|already ok\|re-attach'
 }
 
+test_bdfs_integ_remount_all_writeback() {
+    # When cache_mode=writeback, remount-all must pass --writeback to bdfs blend mount.
+    # Use a mountpoint stub that reports nothing mounted so the remount path is taken,
+    # then verify --writeback appears in the dry-run log output.
+    local stub_dir state_dir
+    stub_dir=$(_bdfs_stub_setup)
+    state_dir=$(mktemp -d)
+    # Override mountpoint stub: nothing is mounted
+    cat > "${stub_dir}/mountpoint" <<'STUB'
+#!/usr/bin/env bash
+exit 1
+STUB
+    chmod +x "${stub_dir}/mountpoint"
+    echo "/mnt/blend|test-vm|my-share|writeback|btrfs-uuid|dwarfs-uuid" \
+        > "${state_dir}/shares.state"
+    local output
+    output=$(_bdfs_run "$stub_dir" "$state_dir" remount-all --dry-run 2>&1)
+    local rc=$?
+    _bdfs_stub_teardown "$stub_dir" "$state_dir"
+    [[ $rc -eq 0 ]] && echo "$output" | grep -q '\-\-writeback'
+}
+
 test_bdfs_integ_demote_run_rejects_unmounted() {
     local stub_dir state_dir
     stub_dir=$(_bdfs_stub_setup)
@@ -2705,6 +2733,7 @@ run_bdfs_stub_tests() {
     run_test "bdfs unshare removes state entry"   test_bdfs_integ_unshare_removes_state
     run_test "bdfs remount-all no state"          test_bdfs_integ_remount_all_no_state
     run_test "bdfs remount-all dry-run"           test_bdfs_integ_remount_all_dry_run
+    run_test "bdfs remount-all writeback flag"    test_bdfs_integ_remount_all_writeback
     run_test "bdfs demote-run rejects unmounted"  test_bdfs_integ_demote_run_rejects_unmounted
     run_test "bdfs status runs without error"     test_bdfs_integ_status_runs_without_error
 }
