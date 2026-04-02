@@ -727,6 +727,14 @@ test_bdfs_has_cmd_remount_all() {
     grep -q 'cmd_remount_all()' "$IWT_ROOT/storage/setup-bdfs.sh"
 }
 
+test_bdfs_has_cmd_blend_persist() {
+    grep -q 'cmd_blend_persist()' "$IWT_ROOT/storage/setup-bdfs.sh"
+}
+
+test_bdfs_has_cmd_install_units() {
+    grep -q 'cmd_install_units()' "$IWT_ROOT/storage/setup-bdfs.sh"
+}
+
 test_bdfs_has_cmd_check() {
     grep -q 'cmd_check()' "$IWT_ROOT/storage/setup-bdfs.sh"
 }
@@ -826,19 +834,22 @@ test_bdfs_remount_all_no_state() {
 
 # CLI dispatch: all bdfs-* subcommands must be wired in iwt.sh
 test_cli_vm_storage_bdfs_dispatch() {
-    grep -q 'bdfs-partition'      "$IWT_ROOT/cli/iwt.sh"
-    grep -q 'bdfs-blend'          "$IWT_ROOT/cli/iwt.sh"
-    grep -q 'bdfs-export'         "$IWT_ROOT/cli/iwt.sh"
-    grep -q 'bdfs-import'         "$IWT_ROOT/cli/iwt.sh"
-    grep -q 'bdfs-snapshot'       "$IWT_ROOT/cli/iwt.sh"
-    grep -q 'bdfs-promote'        "$IWT_ROOT/cli/iwt.sh"
-    grep -q 'bdfs-demote'         "$IWT_ROOT/cli/iwt.sh"
-    grep -q 'bdfs-share'          "$IWT_ROOT/cli/iwt.sh"
-    grep -q 'bdfs-unshare'        "$IWT_ROOT/cli/iwt.sh"
-    grep -q 'bdfs-list-shares'    "$IWT_ROOT/cli/iwt.sh"
+    grep -q 'bdfs-partition'       "$IWT_ROOT/cli/iwt.sh"
+    grep -q 'bdfs-blend'           "$IWT_ROOT/cli/iwt.sh"
+    grep -q 'bdfs-export'          "$IWT_ROOT/cli/iwt.sh"
+    grep -q 'bdfs-import'          "$IWT_ROOT/cli/iwt.sh"
+    grep -q 'bdfs-snapshot'        "$IWT_ROOT/cli/iwt.sh"
+    grep -q 'bdfs-promote'         "$IWT_ROOT/cli/iwt.sh"
+    grep -q 'bdfs-demote'          "$IWT_ROOT/cli/iwt.sh"
+    grep -q 'bdfs-share'           "$IWT_ROOT/cli/iwt.sh"
+    grep -q 'bdfs-unshare'         "$IWT_ROOT/cli/iwt.sh"
+    grep -q 'bdfs-list-shares'     "$IWT_ROOT/cli/iwt.sh"
     grep -q 'bdfs-demote-schedule' "$IWT_ROOT/cli/iwt.sh"
-    grep -q 'bdfs-remount-all'    "$IWT_ROOT/cli/iwt.sh"
-    grep -q 'bdfs-check'          "$IWT_ROOT/cli/iwt.sh"
+    grep -q 'bdfs-remount-all'     "$IWT_ROOT/cli/iwt.sh"
+    grep -q 'bdfs-blend-persist'   "$IWT_ROOT/cli/iwt.sh"
+    grep -q 'bdfs-install-units'   "$IWT_ROOT/cli/iwt.sh"
+    grep -q 'bdfs-uninstall-units' "$IWT_ROOT/cli/iwt.sh"
+    grep -q 'bdfs-check'           "$IWT_ROOT/cli/iwt.sh"
 }
 
 test_cli_vm_storage_help_mentions_bdfs() {
@@ -930,6 +941,48 @@ test_guest_bdfs_mount_script_handles_unmount() {
     grep -q '\$Unmount' "$IWT_ROOT/guest/bdfs-mount-shares.ps1"
 }
 
+# shares.state UUID fields
+test_bdfs_shares_state_stores_uuids() {
+    # shares.state write line must include 6 pipe-separated fields
+    grep -q 'blend_mount.*vm_name.*share_name.*cache_mode.*btrfs_uuid.*dwarfs_uuid' \
+        "$IWT_ROOT/storage/setup-bdfs.sh"
+}
+
+test_bdfs_blend_mount_writes_state() {
+    # blend mount must persist UUIDs to a per-mountpoint state file
+    grep -q 'blend-.*\.state' "$IWT_ROOT/storage/setup-bdfs.sh"
+}
+
+test_bdfs_remount_all_uses_stored_uuids() {
+    grep -q 'btrfs_uuid.*dwarfs_uuid' "$IWT_ROOT/storage/setup-bdfs.sh"
+    grep -q 'bdfs blend mount.*btrfs-uuid' "$IWT_ROOT/storage/setup-bdfs.sh"
+}
+
+test_bdfs_blend_persist_has_conf_dir() {
+    grep -q '/etc/iwt' "$IWT_ROOT/storage/setup-bdfs.sh"
+}
+
+test_bdfs_blend_persist_generates_systemd_unit() {
+    grep -q 'systemd-escape' "$IWT_ROOT/storage/setup-bdfs.sh"
+    grep -q '\.mount' "$IWT_ROOT/storage/setup-bdfs.sh"
+}
+
+test_bdfs_install_units_generates_service() {
+    grep -q 'iwt-bdfs-remount-all.service' "$IWT_ROOT/storage/setup-bdfs.sh"
+}
+
+test_bdfs_status_shows_blend_namespaces() {
+    grep -q 'Blend namespaces' "$IWT_ROOT/storage/setup-bdfs.sh"
+}
+
+test_bdfs_status_shows_shares_cross_ref() {
+    grep -q 'VM STATUS' "$IWT_ROOT/storage/setup-bdfs.sh"
+}
+
+test_bdfs_status_shows_demote_timers() {
+    grep -q 'Demote timers' "$IWT_ROOT/storage/setup-bdfs.sh"
+}
+
 # TUI
 test_tui_has_menu_bdfs() {
     grep -q 'menu_bdfs()' "$IWT_ROOT/tui/iwt-tui.sh"
@@ -941,6 +994,18 @@ test_tui_bdfs_in_main_menu() {
 
 test_tui_bdfs_in_vm_menu() {
     grep -q 'bdfs).*menu_bdfs' "$IWT_ROOT/tui/iwt-tui.sh"
+}
+
+test_tui_bdfs_has_remount_all() {
+    grep -q 'remount-all' "$IWT_ROOT/tui/iwt-tui.sh"
+}
+
+test_tui_bdfs_has_blend_persist() {
+    grep -q 'blend-persist' "$IWT_ROOT/tui/iwt-tui.sh"
+}
+
+test_tui_bdfs_has_install_units() {
+    grep -q 'install-units' "$IWT_ROOT/tui/iwt-tui.sh"
 }
 
 # --- lib.sh Btrfs/DwarFS helpers ---
@@ -1953,6 +2018,8 @@ run_unit_tests() {
     run_test "bdfs cmd_demote_schedule"                test_bdfs_has_cmd_demote_schedule
     run_test "bdfs cmd_demote_run"                     test_bdfs_has_cmd_demote_run
     run_test "bdfs cmd_remount_all"                    test_bdfs_has_cmd_remount_all
+    run_test "bdfs cmd_blend_persist"                  test_bdfs_has_cmd_blend_persist
+    run_test "bdfs cmd_install_units"                  test_bdfs_has_cmd_install_units
     run_test "bdfs cmd_check"                          test_bdfs_has_cmd_check
     run_test "bdfs _require_bdfs guard"                test_bdfs_has_require_bdfs_guard
     run_test "bdfs export requires --partition"        test_bdfs_export_requires_partition
@@ -1988,9 +2055,21 @@ run_unit_tests() {
     run_test "Guest bdfs-mount-shares.ps1 param block" test_guest_bdfs_mount_script_has_param_block
     run_test "Guest bdfs-mount-shares.ps1 -All flag"   test_guest_bdfs_mount_script_handles_all_flag
     run_test "Guest bdfs-mount-shares.ps1 -Unmount"    test_guest_bdfs_mount_script_handles_unmount
+    run_test "bdfs shares.state stores UUIDs"          test_bdfs_shares_state_stores_uuids
+    run_test "bdfs blend mount writes state file"      test_bdfs_blend_mount_writes_state
+    run_test "bdfs remount-all uses stored UUIDs"      test_bdfs_remount_all_uses_stored_uuids
+    run_test "bdfs blend-persist conf dir"             test_bdfs_blend_persist_has_conf_dir
+    run_test "bdfs blend-persist generates .mount"     test_bdfs_blend_persist_generates_systemd_unit
+    run_test "bdfs install-units generates service"    test_bdfs_install_units_generates_service
+    run_test "bdfs status shows blend namespaces"      test_bdfs_status_shows_blend_namespaces
+    run_test "bdfs status shows shares cross-ref"      test_bdfs_status_shows_shares_cross_ref
+    run_test "bdfs status shows demote timers"         test_bdfs_status_shows_demote_timers
     run_test "TUI has menu_bdfs"                       test_tui_has_menu_bdfs
     run_test "TUI bdfs in main menu"                   test_tui_bdfs_in_main_menu
     run_test "TUI bdfs in VM menu"                     test_tui_bdfs_in_vm_menu
+    run_test "TUI bdfs has remount-all"                test_tui_bdfs_has_remount_all
+    run_test "TUI bdfs has blend-persist"              test_tui_bdfs_has_blend_persist
+    run_test "TUI bdfs has install-units"              test_tui_bdfs_has_install_units
 
     # --- lib.sh helpers ---
     run_test "lib check_btrfs_host"            test_lib_has_check_btrfs_host

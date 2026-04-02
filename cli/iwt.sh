@@ -202,7 +202,7 @@ cmd_doctor() {
     local bdfs_state_file="${IWT_BDFS_RUNTIME:-/run/iwt/bdfs}/shares.state"
     if [[ -f "$bdfs_state_file" && -s "$bdfs_state_file" ]]; then
         local stale_count=0
-        while IFS='|' read -r blend_mount vm_name share_name _rest; do
+        while IFS='|' read -r blend_mount vm_name share_name _cache _btrfs_uuid _dwarfs_uuid; do
             [[ -n "$share_name" ]] || continue
             if ! mountpoint -q "$blend_mount" 2>/dev/null; then
                 warn "  Stale bdfs share '$share_name': blend not mounted at $blend_mount"
@@ -697,6 +697,15 @@ cmd_vm_storage() {
         bdfs-remount-all)
             exec "$IWT_ROOT/storage/setup-bdfs.sh" remount-all "$@"
             ;;
+        bdfs-blend-persist)
+            exec "$IWT_ROOT/storage/setup-bdfs.sh" blend-persist "$@"
+            ;;
+        bdfs-install-units)
+            exec "$IWT_ROOT/storage/setup-bdfs.sh" install-units "${2:-install}"
+            ;;
+        bdfs-uninstall-units)
+            exec "$IWT_ROOT/storage/setup-bdfs.sh" install-units "uninstall"
+            ;;
 
         # EROFS subcommands
         erofs-pack)
@@ -786,6 +795,9 @@ bdfs subcommands (btrfs-dwarfs-framework hybrid storage):
   bdfs-demote-schedule  Install/remove systemd timer for automatic demote
   bdfs-demote-run       Run a single demote pass (invoked by the timer)
   bdfs-remount-all      Re-attach all registered shares after reboot/crash
+  bdfs-blend-persist    Declare blend namespaces that mount at boot
+  bdfs-install-units    Install systemd units for boot-time recovery
+  bdfs-uninstall-units  Remove systemd units
   bdfs-status           Show bdfs partition and blend status
   bdfs-daemon       start|stop|status bdfs_daemon
   bdfs-check        Verify bdfs host prerequisites

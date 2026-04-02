@@ -766,6 +766,7 @@ menu_bdfs() {
             "daemon"          "Manage bdfs_daemon" \
             "partition"       "Manage bdfs partitions" \
             "blend"           "Manage blend namespace" \
+            "blend-persist"   "Declare blend namespaces that mount at boot" \
             "share"           "Share blend namespace with a VM" \
             "list-shares"     "List active bdfs shares" \
             "export"          "Export BTRFS subvolume to DwarFS image" \
@@ -773,7 +774,9 @@ menu_bdfs() {
             "snapshot"        "Snapshot a DwarFS image container" \
             "promote-demote"  "Promote / demote blend paths" \
             "demote-schedule" "Schedule automatic demote" \
-            "status"          "Show bdfs status" \
+            "remount-all"     "Re-attach all shares after reboot/crash" \
+            "install-units"   "Install/remove systemd boot-time units" \
+            "status"          "Show unified bdfs status" \
             "back"            "Back") || break
 
         case "$choice" in
@@ -1000,6 +1003,70 @@ menu_bdfs() {
                         ;;
                     status)
                         _run_cmd "Timer Status" "$IWT_CMD" vm storage bdfs-demote-schedule --status
+                        ;;
+                esac
+                ;;
+
+            blend-persist)
+                local bpchoice
+                bpchoice=$(_dlg_menu "Blend Persist" "Select action:" \
+                    "add"    "Declare a blend namespace to mount at boot" \
+                    "remove" "Remove a persistent blend entry" \
+                    "list"   "List persistent blend namespaces") || continue
+                case "$bpchoice" in
+                    add)
+                        local bp_btrfs bp_dwarfs bp_mount
+                        bp_btrfs=$(_dlg_input "Blend Persist" "BTRFS partition UUID:") || continue
+                        [[ -n "$bp_btrfs" ]] || continue
+                        bp_dwarfs=$(_dlg_input "Blend Persist" "DwarFS partition UUID:") || continue
+                        [[ -n "$bp_dwarfs" ]] || continue
+                        bp_mount=$(_dlg_input "Blend Persist" "Mountpoint:" \
+                            "${IWT_BDFS_BLEND_MOUNT:-/mnt/iwt-blend}") || continue
+                        [[ -n "$bp_mount" ]] || continue
+                        local bp_wb_args=()
+                        if _dlg_yesno "Writeback" "Enable writeback cache?"; then
+                            bp_wb_args=(--writeback)
+                        fi
+                        _run_cmd "Blend Persist Add" "$IWT_CMD" vm storage bdfs-blend-persist add \
+                            --btrfs-uuid "$bp_btrfs" --dwarfs-uuid "$bp_dwarfs" \
+                            --mountpoint "$bp_mount" "${bp_wb_args[@]}"
+                        ;;
+                    remove)
+                        local bp_mount
+                        bp_mount=$(_dlg_input "Blend Persist Remove" "Mountpoint:") || continue
+                        [[ -n "$bp_mount" ]] || continue
+                        _run_cmd "Blend Persist Remove" "$IWT_CMD" vm storage bdfs-blend-persist remove \
+                            --mountpoint "$bp_mount"
+                        ;;
+                    list)
+                        _run_cmd "Persistent Blends" "$IWT_CMD" vm storage bdfs-blend-persist list
+                        ;;
+                esac
+                ;;
+
+            remount-all)
+                if _dlg_yesno "Remount All" "Re-attach all registered bdfs shares now?"; then
+                    _run_cmd "Remount All" "$IWT_CMD" vm storage bdfs-remount-all
+                fi
+                ;;
+
+            install-units)
+                local iuchoice
+                iuchoice=$(_dlg_menu "Systemd Units" "Select action:" \
+                    "install"   "Install iwt-bdfs-remount-all.service" \
+                    "uninstall" "Remove iwt-bdfs-remount-all.service" \
+                    "status"    "Show unit status") || continue
+                case "$iuchoice" in
+                    install)
+                        _run_cmd "Install Units" "$IWT_CMD" vm storage bdfs-install-units
+                        ;;
+                    uninstall)
+                        if _dlg_yesno "Uninstall" "Remove iwt-bdfs-remount-all.service?"; then
+                            _run_cmd "Uninstall Units" "$IWT_CMD" vm storage bdfs-uninstall-units
+                        fi
+                        ;;
+                    status)
+                        _run_cmd "Unit Status" "$IWT_CMD" vm storage bdfs-install-units status
                         ;;
                 esac
                 ;;

@@ -153,12 +153,28 @@ cmd_blend() {
 
             bdfs blend mount "${args[@]}"
             ok "Blend namespace mounted at $mountpoint"
+
+            # Persist UUIDs so bdfs-share and remount-all can recover the
+            # blend namespace after a reboot without requiring the user to
+            # remember the UUIDs.
+            local blend_state_dir="${IWT_BDFS_RUNTIME:-/run/iwt/bdfs}"
+            mkdir -p "$blend_state_dir"
+            local blend_key
+            blend_key="$(echo "$mountpoint" | tr '/' '_')"
+            echo "${btrfs_uuid}|${dwarfs_uuid}|${mountpoint}|${writeback}" \
+                > "${blend_state_dir}/blend-${blend_key}.state"
             ;;
 
         umount)
             local mountpoint="${1:?Usage: iwt vm storage bdfs-blend umount <mountpoint>}"
             bdfs blend umount --mountpoint "$mountpoint"
             ok "Blend namespace unmounted: $mountpoint"
+
+            # Remove the blend state entry
+            local blend_state_dir="${IWT_BDFS_RUNTIME:-/run/iwt/bdfs}"
+            local blend_key
+            blend_key="$(echo "$mountpoint" | tr '/' '_')"
+            rm -f "${blend_state_dir}/blend-${blend_key}.state"
             ;;
 
         help|--help|-h)
@@ -441,23 +457,117 @@ EOF
 }
 
 cmd_status() {
-    local partition="" json=false
+    local partition=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --partition) partition="$2"; shift 2 ;;
-            --json)      json=true;      shift   ;;
-            --help|-h)   echo "Usage: iwt vm storage bdfs-status [--partition UUID] [--json]"; exit 0 ;;
+            --json)      shift ;;  # reserved for future structured output
+            --help|-h)   echo "Usage: iwt vm storage bdfs-status [--partition UUID]"; exit 0 ;;
             *) die "Unknown option: $1" ;;
         esac
     done
 
     _require_bdfs
 
+    echo ""
+    bold "═══ bdfs Status ═══"
+
+    # --- Daemon ---
+    echo ""
+    bold "Daemon:"
+    if pgrep -x bdfs_daemon &>/dev/null; then
+        ok "  bdfs_daemon running (PID $(pgrep -x bdfs_daemon | head -1))"
+    else
+        err "  bdfs_daemon not running"
+    fi
+    if command -v systemctl &>/dev/null; then
+        local svc_state
+        svc_state=$(systemctl is-active iwt-bdfs-remount-all.service 2>/dev/null || echo "inactive")
+        if [[ "$svc_state" == "active" ]]; then
+            ok "  iwt-bdfs-remount-all.service: $svc_state"
+        else
+            info "  iwt-bdfs-remount-all.service: $svc_state"
+        fi
+    fi
+
+    # --- Partitions ---
+    echo ""
+    bold "Partitions:"
     local args=()
     [[ -n "$partition" ]] && args+=(--partition "$partition")
-    [[ "$json" == true ]] && args+=(--json)
+    bdfs partition list "${args[@]}" 2>/dev/null | sed 's/^/  /' || info "  (none registered)"
 
-    bdfs status "${args[@]}"
+    # --- Blend namespaces ---
+    echo ""
+    bold "Blend namespaces:"
+    local state_dir="${IWT_BDFS_RUNTIME:-/run/iwt/bdfs}"
+    local blend_count=0
+    for blend_state in "${state_dir}"/blend-*.state; do
+        [[ -f "$blend_state" ]] || continue
+        local b_btrfs b_dwarfs b_mount b_wb
+        IFS='|' read -r b_btrfs b_dwarfs b_mount b_wb < "$blend_state" 2>/dev/null || continue
+        blend_count=$((blend_count + 1))
+        if mountpoint -q "$b_mount" 2>/dev/null; then
+            ok "  $b_mount  [mounted]  btrfs=${b_btrfs:0:8}.. dwarfs=${b_dwarfs:0:8}.."
+        else
+            warn "  $b_mount  [NOT MOUNTED]  btrfs=${b_btrfs:0:8}.. dwarfs=${b_dwarfs:0:8}.."
+        fi
+    done
+    [[ $blend_count -eq 0 ]] && info "  (no blend namespaces registered)"
+
+    # --- Active shares cross-referenced with VMs ---
+    echo ""
+    bold "Shares:"
+    local shares_file="${state_dir}/shares.state"
+    if [[ ! -f "$shares_file" || ! -s "$shares_file" ]]; then
+        info "  (no active shares)"
+    else
+        printf "  %-20s %-18s %-10s %-10s %-10s %s\n" \
+            "SHARE" "VM" "BLEND" "VM STATUS" "ATTACHED" "UUIDs"
+        printf "  %-20s %-18s %-10s %-10s %-10s %s\n" \
+            "-----" "--" "-----" "---------" "--------" "-----"
+        while IFS='|' read -r blend_mount vm_name share_name cache_mode btrfs_uuid dwarfs_uuid; do
+            [[ -n "$share_name" ]] || continue
+
+            local blend_ok="mounted"
+            mountpoint -q "$blend_mount" 2>/dev/null || blend_ok="DOWN"
+
+            local vm_status="unknown"
+            vm_status=$(incus info "$vm_name" 2>/dev/null | grep '^Status:' | awk '{print $2}' || echo "missing")
+
+            local attached="yes"
+            incus config device show "$vm_name" 2>/dev/null | grep -q "^${share_name}:" || attached="no"
+
+            local uuid_short=""
+            [[ -n "$btrfs_uuid" ]] && uuid_short="${btrfs_uuid:0:8}../${dwarfs_uuid:0:8}.."
+
+            if [[ "$blend_ok" == "DOWN" ]]; then
+                printf "  %-20s %-18s %-10s %-10s %-10s %s\n" \
+                    "$share_name" "$vm_name" "⚠ DOWN" "$vm_status" "$attached" "$uuid_short"
+            elif [[ "$attached" == "no" ]]; then
+                printf "  %-20s %-18s %-10s %-10s %-10s %s\n" \
+                    "$share_name" "$vm_name" "$blend_ok" "$vm_status" "⚠ no" "$uuid_short"
+            else
+                printf "  %-20s %-18s %-10s %-10s %-10s %s\n" \
+                    "$share_name" "$vm_name" "$blend_ok" "$vm_status" "$attached" "$uuid_short"
+            fi
+        done < "$shares_file"
+    fi
+
+    # --- Demote timers ---
+    echo ""
+    bold "Demote timers:"
+    if command -v systemctl &>/dev/null; then
+        local timer_output
+        timer_output=$(systemctl list-timers "iwt-bdfs-demote*" --no-pager 2>/dev/null | grep "iwt-bdfs-demote" || true)
+        if [[ -n "$timer_output" ]]; then
+            echo "$timer_output" | sed 's/^/  /'
+        else
+            info "  (no demote timers active)"
+        fi
+    fi
+
+    echo ""
 }
 
 cmd_daemon() {
@@ -827,18 +937,37 @@ cmd_remount_all() {
 
     local remounted=0 skipped=0 failed=0
 
-    while IFS='|' read -r blend_mount vm_name share_name cache_mode; do
+    while IFS='|' read -r blend_mount vm_name share_name cache_mode btrfs_uuid dwarfs_uuid; do
         [[ -n "$share_name" ]] || continue
 
         info "Share: $share_name  VM: $vm_name  Blend: $blend_mount"
 
-        # Re-mount the blend namespace if it dropped
+        # Re-mount the blend namespace if it dropped, using stored UUIDs
         if ! mountpoint -q "$blend_mount" 2>/dev/null; then
-            warn "  Blend not mounted at $blend_mount"
-            warn "  Cannot remount blend automatically — bdfs-blend mount requires UUIDs."
-            warn "  Run: iwt vm storage bdfs-blend mount --mountpoint $blend_mount ..."
-            failed=$((failed + 1))
-            continue
+            if [[ -n "$btrfs_uuid" && -n "$dwarfs_uuid" ]]; then
+                info "  Blend not mounted — remounting with stored UUIDs..."
+                if [[ "$dry_run" == true ]]; then
+                    info "  [dry-run] Would run: bdfs blend mount --btrfs-uuid $btrfs_uuid --dwarfs-uuid $dwarfs_uuid --mountpoint $blend_mount"
+                else
+                    if bdfs blend mount \
+                           --btrfs-uuid  "$btrfs_uuid"  \
+                           --dwarfs-uuid "$dwarfs_uuid" \
+                           --mountpoint  "$blend_mount" 2>/dev/null; then
+                        ok "  Blend remounted at $blend_mount"
+                    else
+                        warn "  Failed to remount blend at $blend_mount"
+                        warn "  Run manually: iwt vm storage bdfs-blend mount --btrfs-uuid $btrfs_uuid --dwarfs-uuid $dwarfs_uuid --mountpoint $blend_mount"
+                        failed=$((failed + 1))
+                        continue
+                    fi
+                fi
+            else
+                warn "  Blend not mounted at $blend_mount and no UUIDs stored"
+                warn "  Run: iwt vm storage bdfs-blend mount --mountpoint $blend_mount ..."
+                warn "  (Re-share with bdfs-share to store UUIDs for future auto-recovery)"
+                failed=$((failed + 1))
+                continue
+            fi
         fi
 
         # Re-attach the virtiofs device to the VM if it disappeared
@@ -873,6 +1002,216 @@ cmd_remount_all() {
     echo ""
     ok "remount-all complete: $remounted re-attached, $skipped already ok, $failed failed"
     [[ $failed -eq 0 ]]
+}
+
+cmd_blend_persist() {
+    local action="${1:-add}"
+    shift || true
+
+    local btrfs_uuid="" dwarfs_uuid="" mountpoint="" writeback=false
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --btrfs-uuid)   btrfs_uuid="$2";   shift 2 ;;
+            --dwarfs-uuid)  dwarfs_uuid="$2";  shift 2 ;;
+            --mountpoint)   mountpoint="$2";   shift 2 ;;
+            --writeback)    writeback=true;    shift   ;;
+            --help|-h)      _usage_blend_persist; exit 0 ;;
+            *) die "Unknown option: $1" ;;
+        esac
+    done
+
+    local conf_dir="/etc/iwt"
+    local conf_file="${conf_dir}/bdfs-blends.conf"
+
+    case "$action" in
+        add)
+            [[ -n "$btrfs_uuid"  ]] || die "--btrfs-uuid is required"
+            [[ -n "$dwarfs_uuid" ]] || die "--dwarfs-uuid is required"
+            [[ -n "$mountpoint"  ]] || die "--mountpoint is required"
+
+            echo ""
+            bold "bdfs blend-persist add"
+            info "BTRFS UUID:  $btrfs_uuid"
+            info "DwarFS UUID: $dwarfs_uuid"
+            info "Mountpoint:  $mountpoint"
+            info "Writeback:   $writeback"
+            echo ""
+
+            # Write config entry
+            sudo mkdir -p "$conf_dir"
+            # Remove any existing entry for this mountpoint first
+            if [[ -f "$conf_file" ]]; then
+                sudo grep -v "^[^#]*|${mountpoint}$\|^[^#]*|${mountpoint}|" \
+                    "$conf_file" | sudo tee /tmp/bdfs-blends-tmp > /dev/null || true
+                sudo mv /tmp/bdfs-blends-tmp "$conf_file"
+            fi
+            echo "${btrfs_uuid}|${dwarfs_uuid}|${mountpoint}|${writeback}" \
+                | sudo tee -a "$conf_file" > /dev/null
+            ok "Blend entry added to $conf_file"
+
+            # Generate a systemd .mount unit for this blend
+            # systemd mount unit names must match the mount path with / → -
+            local unit_name
+            unit_name="$(systemd-escape --path "$mountpoint").mount"
+            local unit_file="/etc/systemd/system/${unit_name}"
+
+            local wb_opts=""
+            [[ "$writeback" == true ]] && wb_opts=" --writeback"
+
+            sudo tee "$unit_file" > /dev/null <<EOF
+[Unit]
+Description=IWT bdfs blend namespace: ${mountpoint}
+Documentation=https://github.com/Interested-Deving-1896/incus-windows-toolkit
+After=bdfs_daemon.service network-online.target
+Requires=bdfs_daemon.service
+
+[Mount]
+What=bdfs-blend
+Where=${mountpoint}
+Type=fuse.bdfs
+Options=btrfs-uuid=${btrfs_uuid},dwarfs-uuid=${dwarfs_uuid}${wb_opts:+,writeback}
+ExecMount=${IWT_ROOT}/storage/setup-bdfs.sh blend mount --btrfs-uuid ${btrfs_uuid} --dwarfs-uuid ${dwarfs_uuid} --mountpoint ${mountpoint}${wb_opts}
+ExecUnmount=${IWT_ROOT}/storage/setup-bdfs.sh blend umount ${mountpoint}
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+            sudo systemctl daemon-reload
+            sudo systemctl enable "$unit_name"
+            ok "Systemd mount unit installed: $unit_name"
+            info "To mount now: sudo systemctl start $unit_name"
+            info "To view logs: journalctl -u $unit_name"
+            ;;
+
+        remove)
+            [[ -n "$mountpoint" ]] || die "--mountpoint is required"
+
+            local unit_name
+            unit_name="$(systemd-escape --path "$mountpoint").mount"
+
+            sudo systemctl disable --now "$unit_name" 2>/dev/null || true
+            sudo rm -f "/etc/systemd/system/${unit_name}"
+            sudo systemctl daemon-reload
+
+            if [[ -f "$conf_file" ]]; then
+                sudo grep -v "|${mountpoint}|" "$conf_file" | sudo tee /tmp/bdfs-blends-tmp > /dev/null || true
+                sudo mv /tmp/bdfs-blends-tmp "$conf_file"
+            fi
+
+            ok "Blend persistence removed for $mountpoint"
+            ;;
+
+        list)
+            echo ""
+            bold "Persistent blend namespaces ($conf_file):"
+            echo ""
+            if [[ ! -f "$conf_file" || ! -s "$conf_file" ]]; then
+                info "  (none configured)"
+                return 0
+            fi
+            printf "  %-12s %-12s %-10s %s\n" "BTRFS UUID" "DWARFS UUID" "WRITEBACK" "MOUNTPOINT"
+            printf "  %-12s %-12s %-10s %s\n" "----------" "-----------" "---------" "----------"
+            while IFS='|' read -r b_btrfs b_dwarfs b_mount b_wb; do
+                [[ "$b_btrfs" =~ ^# ]] && continue
+                [[ -n "$b_btrfs" ]] || continue
+                local status="unmounted"
+                mountpoint -q "$b_mount" 2>/dev/null && status="mounted"
+                printf "  %-12s %-12s %-10s %s [%s]\n" \
+                    "${b_btrfs:0:8}.." "${b_dwarfs:0:8}.." "$b_wb" "$b_mount" "$status"
+            done < "$conf_file"
+            ;;
+
+        help|--help|-h)
+            _usage_blend_persist
+            ;;
+
+        *)
+            die "Unknown action: $action. Use: add | remove | list"
+            ;;
+    esac
+}
+
+_usage_blend_persist() {
+    cat <<EOF
+iwt vm storage bdfs-blend-persist - Declare blend namespaces that should mount at boot
+
+Writes an entry to /etc/iwt/bdfs-blends.conf and installs a systemd .mount
+unit so the blend namespace is automatically mounted after bdfs_daemon starts.
+
+Subcommands:
+  add     --btrfs-uuid UUID --dwarfs-uuid UUID --mountpoint PATH [--writeback]
+  remove  --mountpoint PATH
+  list
+
+Examples:
+  iwt vm storage bdfs-blend-persist add \\
+      --btrfs-uuid <uuid> --dwarfs-uuid <uuid> --mountpoint /mnt/blend --writeback
+
+  iwt vm storage bdfs-blend-persist list
+  iwt vm storage bdfs-blend-persist remove --mountpoint /mnt/blend
+EOF
+}
+
+cmd_install_units() {
+    local action="${1:-install}"
+
+    local service_file="/etc/systemd/system/iwt-bdfs-remount-all.service"
+
+    case "$action" in
+        install|"")
+            echo ""
+            bold "Installing iwt-bdfs-remount-all.service"
+            echo ""
+
+            sudo tee "$service_file" > /dev/null <<EOF
+[Unit]
+Description=IWT bdfs: re-attach virtiofs shares and remount blend namespaces
+Documentation=https://github.com/Interested-Deving-1896/incus-windows-toolkit
+# Run after Incus and the network are up so VMs can be queried
+After=network-online.target incus.service
+Wants=network-online.target
+ConditionPathExists=${IWT_BDFS_RUNTIME:-/run/iwt/bdfs}/shares.state
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=${IWT_ROOT}/storage/setup-bdfs.sh remount-all
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+            sudo systemctl daemon-reload
+            sudo systemctl enable iwt-bdfs-remount-all.service
+            ok "iwt-bdfs-remount-all.service installed and enabled"
+            info "It will run at next boot after Incus starts."
+            info "To run now: sudo systemctl start iwt-bdfs-remount-all.service"
+            info "To view logs: journalctl -u iwt-bdfs-remount-all.service"
+            ;;
+
+        uninstall)
+            echo ""
+            bold "Removing iwt-bdfs-remount-all.service"
+            echo ""
+            sudo systemctl disable --now iwt-bdfs-remount-all.service 2>/dev/null || true
+            sudo rm -f "$service_file"
+            sudo systemctl daemon-reload
+            ok "iwt-bdfs-remount-all.service removed"
+            ;;
+
+        status)
+            systemctl status iwt-bdfs-remount-all.service 2>/dev/null || \
+                info "iwt-bdfs-remount-all.service is not installed"
+            ;;
+
+        *)
+            die "Unknown action: $action. Use: install | uninstall | status"
+            ;;
+    esac
 }
 
 _usage_remount_all() {
@@ -921,15 +1260,18 @@ EOF
 # --- Share / unshare blend namespace with a Windows VM ---
 
 cmd_share() {
-    local blend_mount="" vm_name="" share_name="" writeback=false auto_mount=false
+    local blend_mount="" vm_name="" share_name="" writeback=false auto_mount=false \
+          btrfs_uuid="" dwarfs_uuid=""
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            --blend-mount)  blend_mount="$2"; shift 2 ;;
-            --vm)           vm_name="$2";     shift 2 ;;
-            --name)         share_name="$2";  shift 2 ;;
-            --writeback)    writeback=true;   shift   ;;
-            --auto-mount)   auto_mount=true;  shift   ;;
+            --blend-mount)  blend_mount="$2";  shift 2 ;;
+            --vm)           vm_name="$2";      shift 2 ;;
+            --name)         share_name="$2";   shift 2 ;;
+            --btrfs-uuid)   btrfs_uuid="$2";   shift 2 ;;
+            --dwarfs-uuid)  dwarfs_uuid="$2";  shift 2 ;;
+            --writeback)    writeback=true;    shift   ;;
+            --auto-mount)   auto_mount=true;   shift   ;;
             --help|-h)      _usage_share; exit 0 ;;
             *) die "Unknown option: $1" ;;
         esac
@@ -982,10 +1324,26 @@ cmd_share() {
 
     ok "Share '$share_name' attached to '$vm_name'"
 
-    # Persist state so bdfs-unshare and list-shares can clean up
+    # Persist state so bdfs-unshare, list-shares, and remount-all can use it.
+    # Auto-populate UUIDs from the blend state file written by bdfs-blend mount
+    # if the caller didn't supply them explicitly.
     local state_dir="${IWT_BDFS_RUNTIME:-/run/iwt/bdfs}"
     mkdir -p "$state_dir"
-    echo "${blend_mount}|${vm_name}|${share_name}|${cache_mode}" \
+
+    if [[ -z "$btrfs_uuid" || -z "$dwarfs_uuid" ]]; then
+        local blend_key blend_state
+        blend_key="$(echo "$blend_mount" | tr '/' '_')"
+        blend_state="${state_dir}/blend-${blend_key}.state"
+        if [[ -f "$blend_state" ]]; then
+            local _saved_btrfs _saved_dwarfs _saved_mp _saved_wb
+            IFS='|' read -r _saved_btrfs _saved_dwarfs _saved_mp _saved_wb \
+                < "$blend_state" 2>/dev/null || true
+            [[ -z "$btrfs_uuid"  && -n "$_saved_btrfs"  ]] && btrfs_uuid="$_saved_btrfs"
+            [[ -z "$dwarfs_uuid" && -n "$_saved_dwarfs" ]] && dwarfs_uuid="$_saved_dwarfs"
+        fi
+    fi
+
+    echo "${blend_mount}|${vm_name}|${share_name}|${cache_mode}|${btrfs_uuid}|${dwarfs_uuid}" \
         >> "${state_dir}/shares.state"
 
     # Push the share list into the VM immediately if it is running, so
@@ -1016,8 +1374,33 @@ cmd_share() {
         fi
 
         rm -f "$share_list_tmp"
+
+        # Register the Windows logon scheduled task so shares auto-mount
+        # without requiring a separate setup-guest run.
+        if incus exec "$vm_name" -- powershell -Command \
+            'Get-ScheduledTask -TaskName "IWT-bdfs-MountShares" -ErrorAction SilentlyContinue' \
+            2>/dev/null | grep -q "IWT-bdfs-MountShares"; then
+            ok "Logon task 'IWT-bdfs-MountShares' already registered in '$vm_name'"
+        else
+            incus exec "$vm_name" -- powershell -Command '
+                $action   = New-ScheduledTaskAction `
+                    -Execute "powershell.exe" `
+                    -Argument "-NonInteractive -WindowStyle Hidden -File C:\ProgramData\IWT\bdfs-mount-shares.ps1 -All -Quiet"
+                $trigger  = New-ScheduledTaskTrigger -AtLogOn
+                $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Minutes 2)
+                $principal = New-ScheduledTaskPrincipal -UserId "BUILTIN\Users" -RunLevel Highest
+                Register-ScheduledTask `
+                    -TaskName "IWT-bdfs-MountShares" `
+                    -Action $action -Trigger $trigger `
+                    -Settings $settings -Principal $principal `
+                    -Description "Auto-mount IWT bdfs virtiofs shares at logon" `
+                    -Force | Out-Null
+                Write-Host "Scheduled task registered: IWT-bdfs-MountShares"
+            ' 2>/dev/null && ok "Logon task 'IWT-bdfs-MountShares' registered in '$vm_name'" \
+              || warn "Could not register logon task — run: iwt vm setup-guest --vm $vm_name --mount-bdfs-shares"
+        fi
     else
-        info "VM '$vm_name' is not running — share list will be pushed on next setup-guest run"
+        info "VM '$vm_name' is not running — share list and logon task will be set up on next boot"
         info "  iwt vm setup-guest --vm $vm_name --mount-bdfs-shares"
     fi
 
@@ -1061,10 +1444,10 @@ cmd_unshare() {
         warn "Share '$share_name' not found on '$vm_name' — may already be detached"
     fi
 
-    # Remove from state file
+    # Remove from state file (matches on vm_name+share_name regardless of field count)
     local state_file="${IWT_BDFS_RUNTIME:-/run/iwt/bdfs}/shares.state"
     if [[ -f "$state_file" ]]; then
-        grep -v "|${vm_name}|${share_name}|" "$state_file" > "${state_file}.tmp" || true
+        grep -v "^[^|]*|${vm_name}|${share_name}|" "$state_file" > "${state_file}.tmp" || true
         mv "${state_file}.tmp" "$state_file"
     fi
 
@@ -1087,14 +1470,17 @@ cmd_list_shares() {
     printf "  %-20s %-15s %-10s %s\n" "SHARE" "VM" "CACHE" "BLEND MOUNT"
     printf "  %-20s %-15s %-10s %s\n" "-----" "--" "-----" "-----------"
 
-    while IFS='|' read -r blend_mount vm_name share_name cache_mode; do
+    while IFS='|' read -r blend_mount vm_name share_name cache_mode btrfs_uuid dwarfs_uuid; do
         [[ -n "$share_name" ]] || continue
         local mounted="no"
         mountpoint -q "$blend_mount" 2>/dev/null && mounted="yes"
         local attached="no"
         incus config device show "$vm_name" 2>/dev/null | grep -q "^${share_name}:" && attached="yes"
-        printf "  %-20s %-15s %-10s %s (blend mounted: %s, vm attached: %s)\n" \
-            "$share_name" "$vm_name" "${cache_mode:-none}" "$blend_mount" "$mounted" "$attached"
+        local uuid_info=""
+        [[ -n "$btrfs_uuid" ]] && uuid_info=" btrfs=${btrfs_uuid:0:8}.. dwarfs=${dwarfs_uuid:0:8}.."
+        printf "  %-20s %-15s %-10s %s (blend: %s, vm: %s%s)\n" \
+            "$share_name" "$vm_name" "${cache_mode:-none}" "$blend_mount" \
+            "$mounted" "$attached" "$uuid_info"
     done < "$state_file"
 }
 
@@ -1164,6 +1550,8 @@ Subcommands:
   demote-schedule                     Install/remove a systemd timer for automatic demote
   demote-run                          Run a single demote pass (used by the timer)
   remount-all                         Re-attach all registered shares after reboot/crash
+  blend-persist                       Declare blend namespaces that mount at boot
+  install-units                       Install systemd units for boot-time recovery
   status                              Show bdfs partition/blend status
   daemon       start|stop|status      Manage bdfs_daemon
   check                               Verify host prerequisites
@@ -1192,6 +1580,9 @@ case "$subcmd" in
     demote-schedule)  cmd_demote_schedule  "$@" ;;
     demote-run)       cmd_demote_run       "$@" ;;
     remount-all)      cmd_remount_all      "$@" ;;
+    blend-persist)    cmd_blend_persist    "$@" ;;
+    install-units)    cmd_install_units    "${1:-install}" ;;
+    uninstall-units)  cmd_install_units    "uninstall" ;;
     status)           cmd_status           "$@" ;;
     daemon)       cmd_daemon      "$@" ;;
     check)        cmd_check       "$@" ;;
