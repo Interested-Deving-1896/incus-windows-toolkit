@@ -267,7 +267,7 @@ main() {
 
     # Push bdfs-mount-shares.ps1 and register it as a startup task
     if [[ "$MOUNT_BDFS_SHARES" == true ]]; then
-        local bdfs_state="${IWT_BDFS_RUNTIME:-/run/iwt/bdfs}/shares.state"
+        local bdfs_state="${IWT_BDFS_STATE_DIR:-/var/lib/iwt/bdfs}/shares.state"
 
         # Only proceed if there are active bdfs shares for this VM
         local has_shares=false

@@ -518,7 +518,7 @@ cmd_status() {
     # --- Active shares cross-referenced with VMs ---
     echo ""
     bold "Shares:"
-    local shares_file="${state_dir}/shares.state"
+    local shares_file="${IWT_BDFS_STATE_DIR:-/var/lib/iwt/bdfs}/shares.state"
     if [[ ! -f "$shares_file" || ! -s "$shares_file" ]]; then
         info "  (no active shares)"
     else
@@ -899,7 +899,11 @@ cmd_demote_run() {
         local args=(--blend-path "$subvol_path" --image-name "$image_name" --compression "$compression")
         [[ "$delete_subvol" == true ]] && args+=(--delete-subvol)
 
-        if bdfs demote "${args[@]}" 2>&1 | while IFS= read -r l; do info "    $l"; done; then
+        local demote_out
+        demote_out=$(bdfs demote "${args[@]}" 2>&1)
+        local demote_rc=$?
+        while IFS= read -r l; do info "    $l"; done <<< "$demote_out"
+        if [[ $demote_rc -eq 0 ]]; then
             demoted=$((demoted + 1))
         else
             warn "  Demote failed for $subvol_path — skipping"
@@ -1136,39 +1140,32 @@ _install_blend_mount_template() {
     local template_file="/etc/systemd/system/iwt-bdfs-blend-mount@.service"
     [[ -f "$template_file" ]] && return 0  # already installed
 
-    sudo tee "$template_file" > /dev/null <<'UNIT'
+    # Unquoted heredoc: ${IWT_ROOT} is baked in at write time (same as
+    # cmd_install_blend_template). The \$ escapes are for systemd unit
+    # variables that must remain literal in the file.
+    sudo tee "$template_file" > /dev/null <<UNIT
 [Unit]
 Description=IWT bdfs blend namespace mount: %I
 Documentation=https://github.com/Interested-Deving-1896/incus-windows-toolkit
 After=network-online.target
-# bdfs_daemon must be running before we attempt to mount
 After=bdfs_daemon.service
 Requires=bdfs_daemon.service
-# Ensure the mountpoint directory exists
 ConditionPathIsDirectory=%f
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-
-# These are overridden by the per-instance drop-in (10-uuids.conf)
 Environment="BDFS_BTRFS_UUID="
 Environment="BDFS_DWARFS_UUID="
 Environment="BDFS_WRITEBACK=false"
 Environment="BDFS_MOUNTPOINT=%f"
-
 ExecStartPre=/bin/mkdir -p %f
-ExecStart=/bin/bash -c '\
-    args=(--btrfs-uuid "$BDFS_BTRFS_UUID" --dwarfs-uuid "$BDFS_DWARFS_UUID" --mountpoint "$BDFS_MOUNTPOINT"); \
-    [[ "$BDFS_WRITEBACK" == "true" ]] && args+=(--writeback); \
-    exec IWT_ROOT="$(dirname "$(readlink -f /etc/systemd/system/iwt-bdfs-blend-mount@.service)")" \
-        /bin/bash "$(dirname "$(readlink -f /etc/systemd/system/iwt-bdfs-blend-mount@.service)")/../storage/setup-bdfs.sh" \
-        blend mount "${args[@]}"'
-ExecStop=/bin/bash -c '\
-    exec IWT_ROOT="$(dirname "$(readlink -f /etc/systemd/system/iwt-bdfs-blend-mount@.service)")/.." \
-        /bin/bash "$(dirname "$(readlink -f /etc/systemd/system/iwt-bdfs-blend-mount@.service)")/../storage/setup-bdfs.sh" \
-        blend umount "$BDFS_MOUNTPOINT"'
-
+ExecStart=${IWT_ROOT}/storage/setup-bdfs.sh blend mount \\
+    --btrfs-uuid \$BDFS_BTRFS_UUID \\
+    --dwarfs-uuid \$BDFS_DWARFS_UUID \\
+    --mountpoint \$BDFS_MOUNTPOINT
+ExecStartPost=/bin/bash -c '[[ "\$BDFS_WRITEBACK" == "true" ]] && ${IWT_ROOT}/storage/setup-bdfs.sh blend mount --writeback --mountpoint \$BDFS_MOUNTPOINT || true'
+ExecStop=${IWT_ROOT}/storage/setup-bdfs.sh blend umount \$BDFS_MOUNTPOINT
 StandardOutput=journal
 StandardError=journal
 
@@ -1200,11 +1197,7 @@ Environment="BDFS_DWARFS_UUID="
 Environment="BDFS_WRITEBACK=false"
 Environment="BDFS_MOUNTPOINT=%f"
 ExecStartPre=/bin/mkdir -p %f
-ExecStart=${IWT_ROOT}/storage/setup-bdfs.sh blend mount \
-    --btrfs-uuid \$BDFS_BTRFS_UUID \
-    --dwarfs-uuid \$BDFS_DWARFS_UUID \
-    --mountpoint \$BDFS_MOUNTPOINT
-ExecStartPost=/bin/bash -c '[[ "\$BDFS_WRITEBACK" == "true" ]] && echo writeback || true'
+ExecStart=/bin/bash -c 'args=(--btrfs-uuid "\$BDFS_BTRFS_UUID" --dwarfs-uuid "\$BDFS_DWARFS_UUID" --mountpoint "\$BDFS_MOUNTPOINT"); [[ "\$BDFS_WRITEBACK" == "true" ]] && args+=(--writeback); exec ${IWT_ROOT}/storage/setup-bdfs.sh blend mount "\${args[@]}"'
 ExecStop=${IWT_ROOT}/storage/setup-bdfs.sh blend umount \$BDFS_MOUNTPOINT
 StandardOutput=journal
 StandardError=journal
@@ -1306,7 +1299,7 @@ _usage_remount_all() {
     cat <<EOF
 iwt vm storage bdfs-remount-all - Re-attach all registered bdfs shares after a reboot or crash
 
-Reads /run/iwt/bdfs/shares.state and re-attaches any virtiofs share that is
+Reads /var/lib/iwt/bdfs/shares.state and re-attaches any virtiofs share that is
 no longer attached to its VM. Blend namespaces that are not mounted are
 reported but cannot be remounted automatically (UUIDs are required).
 
@@ -1348,7 +1341,7 @@ EOF
 # --- Share / unshare blend namespace with a Windows VM ---
 
 cmd_share() {
-    local blend_mount="" vm_name="" share_name="" writeback=false auto_mount=false \
+    local blend_mount="" vm_name="" share_name="" writeback=false \
           btrfs_uuid="" dwarfs_uuid=""
 
     while [[ $# -gt 0 ]]; do
@@ -1359,7 +1352,6 @@ cmd_share() {
             --btrfs-uuid)   btrfs_uuid="$2";   shift 2 ;;
             --dwarfs-uuid)  dwarfs_uuid="$2";  shift 2 ;;
             --writeback)    writeback=true;    shift   ;;
-            --auto-mount)   auto_mount=true;   shift   ;;
             --help|-h)      _usage_share; exit 0 ;;
             *) die "Unknown option: $1" ;;
         esac
@@ -1381,11 +1373,7 @@ cmd_share() {
 
     # Verify the blend namespace is actually mounted
     if ! mountpoint -q "$blend_mount" 2>/dev/null; then
-        if [[ "$auto_mount" == true ]]; then
-            die "Blend namespace is not mounted at '$blend_mount'.\n  Mount it first with: iwt vm storage bdfs-blend mount --mountpoint $blend_mount ..."
-        else
-            die "Blend namespace is not mounted at '$blend_mount'.\n  Mount it first with: iwt vm storage bdfs-blend mount --mountpoint $blend_mount ...\n  Or pass --auto-mount to fail with a clearer message."
-        fi
+        die "Blend namespace is not mounted at '$blend_mount'.\n  Mount it first: iwt vm storage bdfs-blend mount --btrfs-uuid <uuid> --dwarfs-uuid <uuid> --mountpoint $blend_mount"
     fi
 
     # Verify the VM exists
@@ -1648,6 +1636,7 @@ Subcommands:
   demote-run                          Run a single demote pass (used by the timer)
   remount-all                         Re-attach all registered shares after reboot/crash
   blend-persist                       Declare blend namespaces that mount at boot
+  install-blend-template              Write the iwt-bdfs-blend-mount@.service template unit
   install-units                       Install systemd units for boot-time recovery
   status                              Show bdfs partition/blend status
   daemon       start|stop|status      Manage bdfs_daemon

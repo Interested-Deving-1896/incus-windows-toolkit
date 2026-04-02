@@ -704,7 +704,7 @@ cmd_vm_storage() {
             exec "$IWT_ROOT/storage/setup-bdfs.sh" install-blend-template
             ;;
         bdfs-install-units)
-            exec "$IWT_ROOT/storage/setup-bdfs.sh" install-units "${2:-install}"
+            exec "$IWT_ROOT/storage/setup-bdfs.sh" install-units "${1:-install}" "${@:2}"
             ;;
         bdfs-uninstall-units)
             exec "$IWT_ROOT/storage/setup-bdfs.sh" install-units "uninstall"
@@ -798,8 +798,9 @@ bdfs subcommands (btrfs-dwarfs-framework hybrid storage):
   bdfs-demote-schedule  Install/remove systemd timer for automatic demote
   bdfs-demote-run       Run a single demote pass (invoked by the timer)
   bdfs-remount-all      Re-attach all registered shares after reboot/crash
-  bdfs-blend-persist    Declare blend namespaces that mount at boot
-  bdfs-install-units    Install systemd units for boot-time recovery
+  bdfs-blend-persist          Declare blend namespaces that mount at boot
+  bdfs-install-blend-template Write the iwt-bdfs-blend-mount@.service template unit
+  bdfs-install-units          Install systemd units for boot-time recovery
   bdfs-uninstall-units  Remove systemd units
   bdfs-status           Show bdfs partition and blend status
   bdfs-daemon       start|stop|status bdfs_daemon
