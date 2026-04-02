@@ -768,11 +768,13 @@ menu_bdfs() {
             "blend"           "Manage blend namespace" \
             "blend-persist"   "Declare blend namespaces that mount at boot" \
             "share"           "Share blend namespace with a VM" \
+            "unshare"         "Remove a blend virtiofs share from a VM" \
             "list-shares"     "List active bdfs shares" \
             "export"          "Export BTRFS subvolume to DwarFS image" \
             "import"          "Import DwarFS image to BTRFS subvolume" \
             "snapshot"        "Snapshot a DwarFS image container" \
             "promote-demote"  "Promote / demote blend paths" \
+            "demote-run"      "Run a manual demote pass now" \
             "demote-schedule" "Schedule automatic demote" \
             "remount-all"     "Re-attach all shares after reboot/crash" \
             "install-units"   "Install/remove systemd boot-time units" \
@@ -881,6 +883,17 @@ menu_bdfs() {
                 _run_cmd "bdfs Shares" "$IWT_CMD" vm storage bdfs-list-shares
                 ;;
 
+            unshare)
+                local us_vm us_name
+                us_vm=$(_pick_vm) || continue
+                us_name=$(_dlg_input "bdfs Unshare" "Share name to remove:") || continue
+                [[ -n "$us_name" ]] || continue
+                if _dlg_yesno "Confirm Unshare" "Remove share '$us_name' from '$us_vm'?"; then
+                    _run_cmd "bdfs Unshare" "$IWT_CMD" vm storage bdfs-unshare \
+                        --vm "$us_vm" --name "$us_name"
+                fi
+                ;;
+
             export)
                 local part_uuid subvol_id btrfs_mount img_name compression
                 part_uuid=$(_dlg_input "bdfs Export" "Partition UUID:") || continue
@@ -967,6 +980,24 @@ menu_bdfs() {
                             --compression "$compression" "${del_args[@]}"
                         ;;
                 esac
+                ;;
+
+            demote-run)
+                local dr_mount dr_compression
+                dr_mount=$(_dlg_input "Demote Run" "Blend mountpoint:" \
+                    "${IWT_BDFS_BLEND_MOUNT:-/mnt/iwt-blend}") || continue
+                [[ -n "$dr_mount" ]] || continue
+                dr_compression=$(_dlg_menu "Compression" "Select algorithm:" \
+                    "zstd" "Recommended (fast + small)" \
+                    "lz4"  "Fastest" \
+                    "zlib" "Smallest") || continue
+                local dr_del_args=()
+                if _dlg_yesno "Delete subvol" "Delete BTRFS subvolumes after demoting?"; then
+                    dr_del_args=(--delete-subvol)
+                fi
+                _run_cmd "Demote Run" "$IWT_CMD" vm storage bdfs-demote-run \
+                    --blend-mount "$dr_mount" --compression "$dr_compression" \
+                    "${dr_del_args[@]}"
                 ;;
 
             demote-schedule)

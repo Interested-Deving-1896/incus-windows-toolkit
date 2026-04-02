@@ -808,18 +808,22 @@ test_bdfs_demote_schedule_help() {
 
 # State file parsing: list-shares must handle empty and populated state files
 test_bdfs_list_shares_empty_state() {
-    local tmp_state
-    tmp_state=$(mktemp)
-    IWT_BDFS_RUNTIME="$(dirname "$tmp_state")" \
+    local tmp_dir
+    tmp_dir=$(mktemp -d)
+    # Empty state dir — no shares.state — should report no active shares
+    IWT_BDFS_STATE_DIR="$tmp_dir" \
         "$IWT_ROOT/storage/setup-bdfs.sh" list-shares 2>&1 | grep -q 'No active'
-    rm -f "$tmp_state"
+    rm -rf "$tmp_dir"
 }
 
 # Demote-run: must guard against non-mounted blend path
 test_bdfs_demote_run_rejects_unmounted_path() {
-    ! IWT_BDFS_RUNTIME="$(mktemp -d)" \
+    local tmp_dir
+    tmp_dir=$(mktemp -d)
+    ! IWT_BDFS_STATE_DIR="$tmp_dir" \
         "$IWT_ROOT/storage/setup-bdfs.sh" demote-run \
         --blend-mount /nonexistent/path/that/is/not/mounted 2>/dev/null
+    rm -rf "$tmp_dir"
 }
 
 # Remount-all: must handle missing state file gracefully
@@ -827,7 +831,7 @@ test_bdfs_remount_all_no_state() {
     local tmp_dir
     tmp_dir=$(mktemp -d)
     # No shares.state file — should exit 0 with info message
-    IWT_BDFS_RUNTIME="$tmp_dir" \
+    IWT_BDFS_STATE_DIR="$tmp_dir" \
         "$IWT_ROOT/storage/setup-bdfs.sh" remount-all 2>&1 | grep -q 'No registered'
     rm -rf "$tmp_dir"
 }
