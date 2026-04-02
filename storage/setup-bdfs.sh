@@ -1139,41 +1139,8 @@ EOF
 _install_blend_mount_template() {
     local template_file="/etc/systemd/system/iwt-bdfs-blend-mount@.service"
     [[ -f "$template_file" ]] && return 0  # already installed
-
-    # Unquoted heredoc: ${IWT_ROOT} is baked in at write time (same as
-    # cmd_install_blend_template). The \$ escapes are for systemd unit
-    # variables that must remain literal in the file.
-    sudo tee "$template_file" > /dev/null <<UNIT
-[Unit]
-Description=IWT bdfs blend namespace mount: %I
-Documentation=https://github.com/Interested-Deving-1896/incus-windows-toolkit
-After=network-online.target
-After=bdfs_daemon.service
-Requires=bdfs_daemon.service
-ConditionPathIsDirectory=%f
-
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-Environment="BDFS_BTRFS_UUID="
-Environment="BDFS_DWARFS_UUID="
-Environment="BDFS_WRITEBACK=false"
-Environment="BDFS_MOUNTPOINT=%f"
-ExecStartPre=/bin/mkdir -p %f
-ExecStart=${IWT_ROOT}/storage/setup-bdfs.sh blend mount \\
-    --btrfs-uuid \$BDFS_BTRFS_UUID \\
-    --dwarfs-uuid \$BDFS_DWARFS_UUID \\
-    --mountpoint \$BDFS_MOUNTPOINT
-ExecStartPost=/bin/bash -c '[[ "\$BDFS_WRITEBACK" == "true" ]] && ${IWT_ROOT}/storage/setup-bdfs.sh blend mount --writeback --mountpoint \$BDFS_MOUNTPOINT || true'
-ExecStop=${IWT_ROOT}/storage/setup-bdfs.sh blend umount \$BDFS_MOUNTPOINT
-StandardOutput=journal
-StandardError=journal
-
-[Install]
-WantedBy=multi-user.target
-UNIT
-
-    sudo systemctl daemon-reload
+    # Delegate to cmd_install_blend_template which owns the canonical unit content.
+    cmd_install_blend_template
 }
 
 # Write the template unit with the correct IWT_ROOT path baked in.
@@ -1234,6 +1201,17 @@ EOF
 
 cmd_install_units() {
     local action="${1:-install}"
+
+    case "$action" in
+        --help|-h)
+            echo "Usage: iwt vm storage bdfs-install-units [install|uninstall|status]"
+            echo ""
+            echo "  install    Install iwt-bdfs-remount-all.service and the blend-mount template"
+            echo "  uninstall  Remove iwt-bdfs-remount-all.service"
+            echo "  status     Show service status"
+            return 0
+            ;;
+    esac
 
     local service_file="/etc/systemd/system/iwt-bdfs-remount-all.service"
 
