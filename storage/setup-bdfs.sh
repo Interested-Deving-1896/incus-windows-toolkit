@@ -734,18 +734,49 @@ cmd_demote_run() {
 
     local demoted=0 skipped=0
 
-    # Iterate over top-level BTRFS subvolumes in the blend upper layer that
-    # have been modified since the last demote (mtime newer than the state file).
     local state_dir="${IWT_BDFS_RUNTIME:-/run/iwt/bdfs}"
     local stamp_file
     stamp_file="${state_dir}/demote-last-run-$(echo "$blend_mount" | tr '/' '_')"
     mkdir -p "$state_dir"
 
-    while IFS= read -r subvol_path; do
-        [[ -n "$subvol_path" ]] || continue
+    # Resolve the BTRFS filesystem root that contains the blend mount.
+    # `btrfs subvolume list -o` requires the filesystem root, not a nested
+    # subvolume path — using the blend mount directly fails silently when it
+    # is itself a subvolume. We find the root by walking up to the mount that
+    # has a btrfs filesystem type.
+    local btrfs_root=""
+    while IFS= read -r mnt_point mnt_type _rest; do
+        if [[ "$mnt_type" == "btrfs" && "$blend_mount" == "$mnt_point"* ]]; then
+            # Pick the longest (most specific) matching btrfs mount
+            if [[ ${#mnt_point} -gt ${#btrfs_root} ]]; then
+                btrfs_root="$mnt_point"
+            fi
+        fi
+    done < <(findmnt -rn -o TARGET,FSTYPE 2>/dev/null)
+
+    if [[ -z "$btrfs_root" ]]; then
+        die "Could not find a BTRFS filesystem containing '$blend_mount'. Is the blend namespace on a BTRFS volume?"
+    fi
+
+    info "  BTRFS root: $btrfs_root"
+
+    # Enumerate subvolumes that live under the blend mount path.
+    # `btrfs subvolume list` outputs paths relative to the filesystem root.
+    local blend_rel="${blend_mount#"$btrfs_root"}"
+    blend_rel="${blend_rel#/}"
+
+    while IFS= read -r subvol_rel; do
+        [[ -n "$subvol_rel" ]] || continue
+
+        # Only process subvolumes that are direct children of the blend mount
+        local subvol_parent="${subvol_rel%/*}"
+        [[ "$subvol_parent" == "$blend_rel" ]] || continue
+
+        local subvol_path="${btrfs_root}/${subvol_rel}"
 
         # Skip if nothing changed since last run
-        if [[ -f "$stamp_file" ]] && ! find "$subvol_path" -newer "$stamp_file" -maxdepth 1 -print -quit 2>/dev/null | grep -q .; then
+        if [[ -f "$stamp_file" ]] && \
+           ! find "$subvol_path" -newer "$stamp_file" -maxdepth 1 -print -quit 2>/dev/null | grep -q .; then
             skipped=$((skipped + 1))
             continue
         fi
@@ -763,10 +794,105 @@ cmd_demote_run() {
         else
             warn "  Demote failed for $subvol_path — skipping"
         fi
-    done < <(btrfs subvolume list -o "$blend_mount" 2>/dev/null | awk '{print $NF}' | sed "s|^|${blend_mount}/|")
+    done < <(btrfs subvolume list "$btrfs_root" 2>/dev/null | awk '{print $NF}')
 
     touch "$stamp_file"
     ok "Scheduled demote complete: $demoted demoted, $skipped unchanged"
+}
+
+cmd_remount_all() {
+    local dry_run=false
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --dry-run) dry_run=true; shift ;;
+            --help|-h) _usage_remount_all; exit 0 ;;
+            *) die "Unknown option: $1" ;;
+        esac
+    done
+
+    local state_file="${IWT_BDFS_RUNTIME:-/run/iwt/bdfs}/shares.state"
+
+    if [[ ! -f "$state_file" || ! -s "$state_file" ]]; then
+        info "No registered bdfs shares found (${state_file} is empty or missing)"
+        return 0
+    fi
+
+    _require_bdfs
+
+    echo ""
+    bold "bdfs remount-all"
+    [[ "$dry_run" == true ]] && info "(dry-run — no changes will be made)"
+    echo ""
+
+    local remounted=0 skipped=0 failed=0
+
+    while IFS='|' read -r blend_mount vm_name share_name cache_mode; do
+        [[ -n "$share_name" ]] || continue
+
+        info "Share: $share_name  VM: $vm_name  Blend: $blend_mount"
+
+        # Re-mount the blend namespace if it dropped
+        if ! mountpoint -q "$blend_mount" 2>/dev/null; then
+            warn "  Blend not mounted at $blend_mount"
+            warn "  Cannot remount blend automatically — bdfs-blend mount requires UUIDs."
+            warn "  Run: iwt vm storage bdfs-blend mount --mountpoint $blend_mount ..."
+            failed=$((failed + 1))
+            continue
+        fi
+
+        # Re-attach the virtiofs device to the VM if it disappeared
+        if ! incus info "$vm_name" &>/dev/null 2>&1; then
+            warn "  VM '$vm_name' not found — skipping"
+            skipped=$((skipped + 1))
+            continue
+        fi
+
+        if incus config device show "$vm_name" 2>/dev/null | grep -q "^${share_name}:"; then
+            ok "  Already attached to '$vm_name' — skipping"
+            skipped=$((skipped + 1))
+            continue
+        fi
+
+        if [[ "$dry_run" == true ]]; then
+            info "  [dry-run] Would re-attach '$share_name' to '$vm_name'"
+            remounted=$((remounted + 1))
+            continue
+        fi
+
+        if incus config device add "$vm_name" "$share_name" disk \
+               source="$blend_mount" path="/mnt/${share_name}" 2>/dev/null; then
+            ok "  Re-attached '$share_name' to '$vm_name'"
+            remounted=$((remounted + 1))
+        else
+            warn "  Failed to re-attach '$share_name' to '$vm_name'"
+            failed=$((failed + 1))
+        fi
+    done < "$state_file"
+
+    echo ""
+    ok "remount-all complete: $remounted re-attached, $skipped already ok, $failed failed"
+    [[ $failed -eq 0 ]]
+}
+
+_usage_remount_all() {
+    cat <<EOF
+iwt vm storage bdfs-remount-all - Re-attach all registered bdfs shares after a reboot or crash
+
+Reads /run/iwt/bdfs/shares.state and re-attaches any virtiofs share that is
+no longer attached to its VM. Blend namespaces that are not mounted are
+reported but cannot be remounted automatically (UUIDs are required).
+
+Options:
+  --dry-run   Show what would be done without making changes
+
+Example:
+  # Add to a systemd unit or /etc/rc.local for post-reboot recovery:
+  iwt vm storage bdfs-remount-all
+
+  # Preview what would be remounted:
+  iwt vm storage bdfs-remount-all --dry-run
+EOF
 }
 
 _usage_demote_schedule() {
@@ -861,6 +987,39 @@ cmd_share() {
     mkdir -p "$state_dir"
     echo "${blend_mount}|${vm_name}|${share_name}|${cache_mode}" \
         >> "${state_dir}/shares.state"
+
+    # Push the share list into the VM immediately if it is running, so
+    # bdfs-mount-shares.ps1 can discover shares without a separate
+    # setup-guest --mount-bdfs-shares step.
+    if incus info "$vm_name" 2>/dev/null | grep -q 'Status: Running'; then
+        local ps1_src="${IWT_ROOT}/guest/bdfs-mount-shares.ps1"
+        local share_list_tmp
+        share_list_tmp=$(mktemp)
+
+        echo "# bdfs shares for ${vm_name} — updated by bdfs-share $(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            > "$share_list_tmp"
+        while IFS='|' read -r _blend _vm sname _rest; do
+            [[ "$_vm" == "$vm_name" && -n "$sname" ]] && echo "$sname"
+        done < "${state_dir}/shares.state" >> "$share_list_tmp"
+
+        if incus file push "$share_list_tmp" \
+               "${vm_name}/C:/ProgramData/IWT/bdfs-shares.txt" 2>/dev/null; then
+            ok "Share list pushed to '$vm_name' (C:\\ProgramData\\IWT\\bdfs-shares.txt)"
+        else
+            warn "Could not push share list to '$vm_name' — VM may not have guest agent running"
+            info "  Run manually: iwt vm setup-guest --vm $vm_name --mount-bdfs-shares"
+        fi
+
+        if [[ -f "$ps1_src" ]]; then
+            incus file push "$ps1_src" \
+                "${vm_name}/C:/ProgramData/IWT/bdfs-mount-shares.ps1" 2>/dev/null || true
+        fi
+
+        rm -f "$share_list_tmp"
+    else
+        info "VM '$vm_name' is not running — share list will be pushed on next setup-guest run"
+        info "  iwt vm setup-guest --vm $vm_name --mount-bdfs-shares"
+    fi
 
     echo ""
     ok "bdfs blend namespace ready for Windows"
@@ -1004,6 +1163,7 @@ Subcommands:
   list-shares                         List active bdfs virtiofs shares
   demote-schedule                     Install/remove a systemd timer for automatic demote
   demote-run                          Run a single demote pass (used by the timer)
+  remount-all                         Re-attach all registered shares after reboot/crash
   status                              Show bdfs partition/blend status
   daemon       start|stop|status      Manage bdfs_daemon
   check                               Verify host prerequisites
@@ -1031,6 +1191,7 @@ case "$subcmd" in
     list-shares)      cmd_list_shares      "$@" ;;
     demote-schedule)  cmd_demote_schedule  "$@" ;;
     demote-run)       cmd_demote_run       "$@" ;;
+    remount-all)      cmd_remount_all      "$@" ;;
     status)           cmd_status           "$@" ;;
     daemon)       cmd_daemon      "$@" ;;
     check)        cmd_check       "$@" ;;

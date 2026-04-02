@@ -1,5 +1,49 @@
 # Changelog
 
+## v1.2.0
+
+### bdfs — BTRFS+DwarFS Hybrid Storage
+
+Integrates [btrfs-dwarfs-framework](https://github.com/Interested-Deving-1896/btrfs-dwarfs-framework)
+as an optional storage backend that blends a writable BTRFS upper layer with
+read-only DwarFS lower layers into a unified namespace.
+
+**Core operations** (`iwt vm storage bdfs-*`):
+- `bdfs-partition add/remove/list/show` — register and manage bdfs partitions
+- `bdfs-blend mount/umount` — mount/unmount the BTRFS+DwarFS blend namespace
+- `bdfs-export` — export a BTRFS subvolume to a compressed DwarFS image
+- `bdfs-import` — import a DwarFS image back into a BTRFS subvolume
+- `bdfs-snapshot` — CoW snapshot of a DwarFS image container
+- `bdfs-promote` — make a DwarFS-backed path writable (extract to BTRFS)
+- `bdfs-demote` — compress a BTRFS subvolume into a DwarFS image
+- `bdfs-status` — show partition and blend status
+- `bdfs-daemon start/stop/status` — manage `bdfs_daemon` lifecycle
+- `bdfs-check` — verify host prerequisites
+
+**Windows VM sharing**:
+- `bdfs-share` — expose a blend namespace to a Windows VM via virtiofs; automatically pushes `bdfs-mount-shares.ps1` and the share list into the VM if it is running
+- `bdfs-unshare` — detach the share from the VM
+- `bdfs-list-shares` — list active bdfs virtiofs shares with mount/attach status
+- `guest/bdfs-mount-shares.ps1` — PowerShell helper that auto-mounts bdfs shares as drive letters via WinFsp; supports `-All`, `-ShareName`/`-DriveLetter`, `-List`, `-Unmount`
+- `iwt vm setup-guest --mount-bdfs-shares` — push the helper and register a Windows logon scheduled task (included in `--all`)
+
+**Maintenance**:
+- `bdfs-demote-schedule` — install/remove a systemd timer for automatic recompression of BTRFS upper layer writes; uses `findmnt` to resolve the BTRFS filesystem root correctly even when the blend mount is a nested subvolume
+- `bdfs-demote-run` — single demote pass invoked by the timer; skips unchanged subvolumes via timestamp tracking
+- `bdfs-remount-all` — re-attach all registered shares after a reboot or daemon crash; supports `--dry-run`
+
+**Observability**:
+- `iwt doctor` now checks for bdfs CLI, kernel module, and daemon; warns on stale `shares.state` entries (unmounted blend paths, missing VMs, detached devices) and on active shares with no demote timer
+
+**Configuration** (added to default config):
+- `IWT_BDFS_ENABLED=false` — opt-in flag
+- `IWT_BDFS_COMPRESSION=zstd` — default compression for export/demote
+- `IWT_BDFS_BLEND_MOUNT=/mnt/iwt-blend` — default blend mountpoint
+
+**TUI**: new `bdfs` menu accessible from both the main menu and the VM submenu, covering the full workflow including demote scheduling
+
+**Tests**: 52 new unit tests covering script structure, argument validation, state file handling, CLI dispatch, lib helpers, config defaults, doctor checks, guest setup, and TUI integration
+
 ## v1.1.0
 
 ### Auto-Update
