@@ -648,6 +648,301 @@ test_cli_vm_storage_mount_share_dispatch() {
     grep -q 'setup-dwarfs.sh' "$IWT_ROOT/cli/iwt.sh"
 }
 
+# --- bdfs (btrfs-dwarfs-framework) tests ---
+
+test_bdfs_script_exists() {
+    [[ -x "$IWT_ROOT/storage/setup-bdfs.sh" ]]
+}
+
+test_bdfs_script_has_shebang() {
+    local first_line
+    first_line=$(head -1 "$IWT_ROOT/storage/setup-bdfs.sh")
+    [[ "$first_line" == "#!/usr/bin/env bash" ]]
+}
+
+test_bdfs_usage() {
+    local output
+    output=$("$IWT_ROOT/storage/setup-bdfs.sh" help 2>&1)
+    echo "$output" | grep -q 'partition'
+    echo "$output" | grep -q 'blend'
+    echo "$output" | grep -q 'export'
+    echo "$output" | grep -q 'import'
+    echo "$output" | grep -q 'snapshot'
+    echo "$output" | grep -q 'promote'
+    echo "$output" | grep -q 'demote'
+    echo "$output" | grep -q 'share'
+    echo "$output" | grep -q 'status'
+    echo "$output" | grep -q 'check'
+}
+
+test_bdfs_has_cmd_partition() {
+    grep -q 'cmd_partition()' "$IWT_ROOT/storage/setup-bdfs.sh"
+}
+
+test_bdfs_has_cmd_blend() {
+    grep -q 'cmd_blend()' "$IWT_ROOT/storage/setup-bdfs.sh"
+}
+
+test_bdfs_has_cmd_export() {
+    grep -q 'cmd_export()' "$IWT_ROOT/storage/setup-bdfs.sh"
+}
+
+test_bdfs_has_cmd_import() {
+    grep -q 'cmd_import()' "$IWT_ROOT/storage/setup-bdfs.sh"
+}
+
+test_bdfs_has_cmd_snapshot() {
+    grep -q 'cmd_snapshot()' "$IWT_ROOT/storage/setup-bdfs.sh"
+}
+
+test_bdfs_has_cmd_promote() {
+    grep -q 'cmd_promote()' "$IWT_ROOT/storage/setup-bdfs.sh"
+}
+
+test_bdfs_has_cmd_demote() {
+    grep -q 'cmd_demote()' "$IWT_ROOT/storage/setup-bdfs.sh"
+}
+
+test_bdfs_has_cmd_share() {
+    grep -q 'cmd_share()' "$IWT_ROOT/storage/setup-bdfs.sh"
+}
+
+test_bdfs_has_cmd_unshare() {
+    grep -q 'cmd_unshare()' "$IWT_ROOT/storage/setup-bdfs.sh"
+}
+
+test_bdfs_has_cmd_list_shares() {
+    grep -q 'cmd_list_shares()' "$IWT_ROOT/storage/setup-bdfs.sh"
+}
+
+test_bdfs_has_cmd_demote_schedule() {
+    grep -q 'cmd_demote_schedule()' "$IWT_ROOT/storage/setup-bdfs.sh"
+}
+
+test_bdfs_has_cmd_demote_run() {
+    grep -q 'cmd_demote_run()' "$IWT_ROOT/storage/setup-bdfs.sh"
+}
+
+test_bdfs_has_cmd_remount_all() {
+    grep -q 'cmd_remount_all()' "$IWT_ROOT/storage/setup-bdfs.sh"
+}
+
+test_bdfs_has_cmd_check() {
+    grep -q 'cmd_check()' "$IWT_ROOT/storage/setup-bdfs.sh"
+}
+
+test_bdfs_has_require_bdfs_guard() {
+    grep -q '_require_bdfs()' "$IWT_ROOT/storage/setup-bdfs.sh"
+}
+
+# Argument validation: missing required flags must exit non-zero
+test_bdfs_export_requires_partition() {
+    ! "$IWT_ROOT/storage/setup-bdfs.sh" export 2>/dev/null
+}
+
+test_bdfs_import_requires_partition() {
+    ! "$IWT_ROOT/storage/setup-bdfs.sh" import 2>/dev/null
+}
+
+test_bdfs_snapshot_requires_partition() {
+    ! "$IWT_ROOT/storage/setup-bdfs.sh" snapshot 2>/dev/null
+}
+
+test_bdfs_promote_requires_blend_path() {
+    ! "$IWT_ROOT/storage/setup-bdfs.sh" promote 2>/dev/null
+}
+
+test_bdfs_demote_requires_blend_path() {
+    ! "$IWT_ROOT/storage/setup-bdfs.sh" demote 2>/dev/null
+}
+
+test_bdfs_share_requires_blend_mount() {
+    ! "$IWT_ROOT/storage/setup-bdfs.sh" share 2>/dev/null
+}
+
+test_bdfs_unshare_requires_vm() {
+    ! "$IWT_ROOT/storage/setup-bdfs.sh" unshare 2>/dev/null
+}
+
+test_bdfs_demote_schedule_requires_blend_mount() {
+    ! "$IWT_ROOT/storage/setup-bdfs.sh" demote-schedule 2>/dev/null
+}
+
+test_bdfs_demote_run_requires_blend_mount() {
+    ! "$IWT_ROOT/storage/setup-bdfs.sh" demote-run 2>/dev/null
+}
+
+test_bdfs_unknown_subcommand_fails() {
+    ! "$IWT_ROOT/storage/setup-bdfs.sh" nonexistent-subcommand 2>/dev/null
+}
+
+# Help flags must exit 0 and produce output
+test_bdfs_export_help() {
+    local output
+    output=$("$IWT_ROOT/storage/setup-bdfs.sh" export --help 2>&1)
+    echo "$output" | grep -q 'partition'
+    echo "$output" | grep -q 'subvol-id'
+}
+
+test_bdfs_share_help() {
+    local output
+    output=$("$IWT_ROOT/storage/setup-bdfs.sh" share --help 2>&1)
+    echo "$output" | grep -q 'blend-mount'
+    echo "$output" | grep -q '\-\-vm'
+}
+
+test_bdfs_demote_schedule_help() {
+    local output
+    output=$("$IWT_ROOT/storage/setup-bdfs.sh" demote-schedule --help 2>&1)
+    echo "$output" | grep -q 'interval'
+    echo "$output" | grep -q 'disable'
+}
+
+# State file parsing: list-shares must handle empty and populated state files
+test_bdfs_list_shares_empty_state() {
+    local tmp_state
+    tmp_state=$(mktemp)
+    IWT_BDFS_RUNTIME="$(dirname "$tmp_state")" \
+        "$IWT_ROOT/storage/setup-bdfs.sh" list-shares 2>&1 | grep -q 'No active'
+    rm -f "$tmp_state"
+}
+
+# Demote-run: must guard against non-mounted blend path
+test_bdfs_demote_run_rejects_unmounted_path() {
+    ! IWT_BDFS_RUNTIME="$(mktemp -d)" \
+        "$IWT_ROOT/storage/setup-bdfs.sh" demote-run \
+        --blend-mount /nonexistent/path/that/is/not/mounted 2>/dev/null
+}
+
+# Remount-all: must handle missing state file gracefully
+test_bdfs_remount_all_no_state() {
+    local tmp_dir
+    tmp_dir=$(mktemp -d)
+    # No shares.state file — should exit 0 with info message
+    IWT_BDFS_RUNTIME="$tmp_dir" \
+        "$IWT_ROOT/storage/setup-bdfs.sh" remount-all 2>&1 | grep -q 'No registered'
+    rm -rf "$tmp_dir"
+}
+
+# CLI dispatch: all bdfs-* subcommands must be wired in iwt.sh
+test_cli_vm_storage_bdfs_dispatch() {
+    grep -q 'bdfs-partition'      "$IWT_ROOT/cli/iwt.sh"
+    grep -q 'bdfs-blend'          "$IWT_ROOT/cli/iwt.sh"
+    grep -q 'bdfs-export'         "$IWT_ROOT/cli/iwt.sh"
+    grep -q 'bdfs-import'         "$IWT_ROOT/cli/iwt.sh"
+    grep -q 'bdfs-snapshot'       "$IWT_ROOT/cli/iwt.sh"
+    grep -q 'bdfs-promote'        "$IWT_ROOT/cli/iwt.sh"
+    grep -q 'bdfs-demote'         "$IWT_ROOT/cli/iwt.sh"
+    grep -q 'bdfs-share'          "$IWT_ROOT/cli/iwt.sh"
+    grep -q 'bdfs-unshare'        "$IWT_ROOT/cli/iwt.sh"
+    grep -q 'bdfs-list-shares'    "$IWT_ROOT/cli/iwt.sh"
+    grep -q 'bdfs-demote-schedule' "$IWT_ROOT/cli/iwt.sh"
+    grep -q 'bdfs-remount-all'    "$IWT_ROOT/cli/iwt.sh"
+    grep -q 'bdfs-check'          "$IWT_ROOT/cli/iwt.sh"
+}
+
+test_cli_vm_storage_help_mentions_bdfs() {
+    local output
+    output=$("$IWT_ROOT/cli/iwt.sh" vm storage help 2>&1)
+    echo "$output" | grep -q 'bdfs'
+}
+
+# lib.sh helpers
+test_lib_has_check_bdfs_host() {
+    grep -q 'check_bdfs_host()' "$IWT_ROOT/cli/lib.sh"
+}
+
+test_lib_has_check_bdfs_module() {
+    grep -q 'check_bdfs_module()' "$IWT_ROOT/cli/lib.sh"
+}
+
+test_lib_has_check_bdfs_daemon() {
+    grep -q 'check_bdfs_daemon()' "$IWT_ROOT/cli/lib.sh"
+}
+
+# Default config must include bdfs vars
+test_config_default_has_bdfs_enabled() {
+    local tmp_config
+    tmp_config=$(mktemp)
+    rm "$tmp_config"
+    IWT_CONFIG_FILE="$tmp_config" "$IWT_ROOT/cli/iwt.sh" config init 2>/dev/null
+    grep -q 'IWT_BDFS_ENABLED' "$tmp_config"
+    rm -f "$tmp_config"
+}
+
+test_config_default_has_bdfs_compression() {
+    local tmp_config
+    tmp_config=$(mktemp)
+    rm "$tmp_config"
+    IWT_CONFIG_FILE="$tmp_config" "$IWT_ROOT/cli/iwt.sh" config init 2>/dev/null
+    grep -q 'IWT_BDFS_COMPRESSION' "$tmp_config"
+    rm -f "$tmp_config"
+}
+
+test_config_default_has_bdfs_blend_mount() {
+    local tmp_config
+    tmp_config=$(mktemp)
+    rm "$tmp_config"
+    IWT_CONFIG_FILE="$tmp_config" "$IWT_ROOT/cli/iwt.sh" config init 2>/dev/null
+    grep -q 'IWT_BDFS_BLEND_MOUNT' "$tmp_config"
+    rm -f "$tmp_config"
+}
+
+# Doctor checks
+test_doctor_checks_bdfs() {
+    grep -q 'check_bdfs_host'   "$IWT_ROOT/cli/iwt.sh"
+    grep -q 'check_bdfs_module' "$IWT_ROOT/cli/iwt.sh"
+    grep -q 'check_bdfs_daemon' "$IWT_ROOT/cli/iwt.sh"
+}
+
+test_doctor_checks_bdfs_shares_state() {
+    grep -q 'shares.state' "$IWT_ROOT/cli/iwt.sh"
+}
+
+test_doctor_warns_missing_demote_timer() {
+    grep -q 'demote timer' "$IWT_ROOT/cli/iwt.sh"
+}
+
+# Guest setup
+test_guest_setup_has_bdfs_flag() {
+    local output
+    output=$("$IWT_ROOT/guest/setup-guest.sh" --help 2>&1)
+    echo "$output" | grep -q 'mount-bdfs-shares'
+}
+
+test_guest_setup_all_includes_bdfs() {
+    grep -q 'MOUNT_BDFS_SHARES=true' "$IWT_ROOT/guest/setup-guest.sh"
+}
+
+test_guest_bdfs_mount_script_exists() {
+    [[ -f "$IWT_ROOT/guest/bdfs-mount-shares.ps1" ]]
+}
+
+test_guest_bdfs_mount_script_has_param_block() {
+    grep -q '^param(' "$IWT_ROOT/guest/bdfs-mount-shares.ps1"
+}
+
+test_guest_bdfs_mount_script_handles_all_flag() {
+    grep -q '\$All' "$IWT_ROOT/guest/bdfs-mount-shares.ps1"
+}
+
+test_guest_bdfs_mount_script_handles_unmount() {
+    grep -q '\$Unmount' "$IWT_ROOT/guest/bdfs-mount-shares.ps1"
+}
+
+# TUI
+test_tui_has_menu_bdfs() {
+    grep -q 'menu_bdfs()' "$IWT_ROOT/tui/iwt-tui.sh"
+}
+
+test_tui_bdfs_in_main_menu() {
+    grep -q '"bdfs"' "$IWT_ROOT/tui/iwt-tui.sh"
+}
+
+test_tui_bdfs_in_vm_menu() {
+    grep -q 'bdfs).*menu_bdfs' "$IWT_ROOT/tui/iwt-tui.sh"
+}
+
 # --- lib.sh Btrfs/DwarFS helpers ---
 
 test_lib_has_check_btrfs_host() {
@@ -1640,6 +1935,62 @@ run_unit_tests() {
     run_test "CLI image unpack dispatch"       test_cli_image_unpack_dispatch
     run_test "CLI image help pack/unpack"      test_cli_image_help_mentions_pack
     run_test "CLI vm storage mount-share"      test_cli_vm_storage_mount_share_dispatch
+
+    # --- bdfs (btrfs-dwarfs-framework) ---
+    run_test "bdfs script exists"                      test_bdfs_script_exists
+    run_test "bdfs script shebang"                     test_bdfs_script_has_shebang
+    run_test "bdfs usage"                              test_bdfs_usage
+    run_test "bdfs cmd_partition"                      test_bdfs_has_cmd_partition
+    run_test "bdfs cmd_blend"                          test_bdfs_has_cmd_blend
+    run_test "bdfs cmd_export"                         test_bdfs_has_cmd_export
+    run_test "bdfs cmd_import"                         test_bdfs_has_cmd_import
+    run_test "bdfs cmd_snapshot"                       test_bdfs_has_cmd_snapshot
+    run_test "bdfs cmd_promote"                        test_bdfs_has_cmd_promote
+    run_test "bdfs cmd_demote"                         test_bdfs_has_cmd_demote
+    run_test "bdfs cmd_share"                          test_bdfs_has_cmd_share
+    run_test "bdfs cmd_unshare"                        test_bdfs_has_cmd_unshare
+    run_test "bdfs cmd_list_shares"                    test_bdfs_has_cmd_list_shares
+    run_test "bdfs cmd_demote_schedule"                test_bdfs_has_cmd_demote_schedule
+    run_test "bdfs cmd_demote_run"                     test_bdfs_has_cmd_demote_run
+    run_test "bdfs cmd_remount_all"                    test_bdfs_has_cmd_remount_all
+    run_test "bdfs cmd_check"                          test_bdfs_has_cmd_check
+    run_test "bdfs _require_bdfs guard"                test_bdfs_has_require_bdfs_guard
+    run_test "bdfs export requires --partition"        test_bdfs_export_requires_partition
+    run_test "bdfs import requires --partition"        test_bdfs_import_requires_partition
+    run_test "bdfs snapshot requires --partition"      test_bdfs_snapshot_requires_partition
+    run_test "bdfs promote requires --blend-path"      test_bdfs_promote_requires_blend_path
+    run_test "bdfs demote requires --blend-path"       test_bdfs_demote_requires_blend_path
+    run_test "bdfs share requires --blend-mount"       test_bdfs_share_requires_blend_mount
+    run_test "bdfs unshare requires --vm"              test_bdfs_unshare_requires_vm
+    run_test "bdfs demote-schedule requires --blend-mount" test_bdfs_demote_schedule_requires_blend_mount
+    run_test "bdfs demote-run requires --blend-mount"  test_bdfs_demote_run_requires_blend_mount
+    run_test "bdfs unknown subcommand fails"           test_bdfs_unknown_subcommand_fails
+    run_test "bdfs export --help"                      test_bdfs_export_help
+    run_test "bdfs share --help"                       test_bdfs_share_help
+    run_test "bdfs demote-schedule --help"             test_bdfs_demote_schedule_help
+    run_test "bdfs list-shares empty state"            test_bdfs_list_shares_empty_state
+    run_test "bdfs demote-run rejects unmounted path"  test_bdfs_demote_run_rejects_unmounted_path
+    run_test "bdfs remount-all no state file"          test_bdfs_remount_all_no_state
+    run_test "CLI vm storage bdfs dispatch"            test_cli_vm_storage_bdfs_dispatch
+    run_test "CLI vm storage help mentions bdfs"       test_cli_vm_storage_help_mentions_bdfs
+    run_test "lib check_bdfs_host"                     test_lib_has_check_bdfs_host
+    run_test "lib check_bdfs_module"                   test_lib_has_check_bdfs_module
+    run_test "lib check_bdfs_daemon"                   test_lib_has_check_bdfs_daemon
+    run_test "Config default IWT_BDFS_ENABLED"         test_config_default_has_bdfs_enabled
+    run_test "Config default IWT_BDFS_COMPRESSION"     test_config_default_has_bdfs_compression
+    run_test "Config default IWT_BDFS_BLEND_MOUNT"     test_config_default_has_bdfs_blend_mount
+    run_test "Doctor checks bdfs"                      test_doctor_checks_bdfs
+    run_test "Doctor checks bdfs shares.state"         test_doctor_checks_bdfs_shares_state
+    run_test "Doctor warns missing demote timer"       test_doctor_warns_missing_demote_timer
+    run_test "Guest setup --mount-bdfs-shares flag"    test_guest_setup_has_bdfs_flag
+    run_test "Guest setup --all includes bdfs"         test_guest_setup_all_includes_bdfs
+    run_test "Guest bdfs-mount-shares.ps1 exists"      test_guest_bdfs_mount_script_exists
+    run_test "Guest bdfs-mount-shares.ps1 param block" test_guest_bdfs_mount_script_has_param_block
+    run_test "Guest bdfs-mount-shares.ps1 -All flag"   test_guest_bdfs_mount_script_handles_all_flag
+    run_test "Guest bdfs-mount-shares.ps1 -Unmount"    test_guest_bdfs_mount_script_handles_unmount
+    run_test "TUI has menu_bdfs"                       test_tui_has_menu_bdfs
+    run_test "TUI bdfs in main menu"                   test_tui_bdfs_in_main_menu
+    run_test "TUI bdfs in VM menu"                     test_tui_bdfs_in_vm_menu
 
     # --- lib.sh helpers ---
     run_test "lib check_btrfs_host"            test_lib_has_check_btrfs_host

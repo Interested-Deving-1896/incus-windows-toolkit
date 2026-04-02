@@ -694,6 +694,9 @@ cmd_vm_storage() {
         bdfs-demote-run)
             exec "$IWT_ROOT/storage/setup-bdfs.sh" demote-run "$@"
             ;;
+        bdfs-remount-all)
+            exec "$IWT_ROOT/storage/setup-bdfs.sh" remount-all "$@"
+            ;;
 
         # EROFS subcommands
         erofs-pack)
@@ -782,6 +785,7 @@ bdfs subcommands (btrfs-dwarfs-framework hybrid storage):
   bdfs-list-shares      List active bdfs virtiofs shares
   bdfs-demote-schedule  Install/remove systemd timer for automatic demote
   bdfs-demote-run       Run a single demote pass (invoked by the timer)
+  bdfs-remount-all      Re-attach all registered shares after reboot/crash
   bdfs-status           Show bdfs partition and blend status
   bdfs-daemon       start|stop|status bdfs_daemon
   bdfs-check        Verify bdfs host prerequisites
