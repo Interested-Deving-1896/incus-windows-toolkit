@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.3.0
+
+### bdfs hardening
+
+- **`bdfs-blend-persist`**: replaced broken `.mount` unit with a proper `Type=oneshot` service using the new `iwt-bdfs-blend-mount@.service` template; per-instance UUIDs supplied via drop-in `Environment=` files
+- **`iwt-bdfs-blend-mount@.service`**: parameterized template unit (instantiated via `systemd-escape --path`) with `After=bdfs_daemon.service`; installed by `bdfs-install-units` and `bdfs-blend-persist add`
+- **`shares.state` persistence**: moved from `/run/iwt/bdfs/` (tmpfs, lost on reboot) to `/var/lib/iwt/bdfs/`; blend state files remain ephemeral in `/run/iwt/bdfs/`; new `IWT_BDFS_STATE_DIR` config var
+- **`bdfs-share` deduplication**: rejects duplicate `vm+share` registrations with a clear remediation message
+- **`bdfs-remount-all` full auto-recovery**: uses stored UUIDs to remount dropped blend namespaces before re-attaching virtiofs devices; post-reboot recovery is now zero-touch for shares registered with UUID data
+- **`bdfs-install-units`**: also installs the `iwt-bdfs-blend-mount@.service` template alongside `iwt-bdfs-remount-all.service`
+- **Integration tests**: stub-based scaffold covering `bdfs-share` deduplication, `remount-all` with/without UUIDs, `list-shares` state parsing, and `bdfs-check` output
+
 ## v1.2.0
 
 ### bdfs — BTRFS+DwarFS Hybrid Storage

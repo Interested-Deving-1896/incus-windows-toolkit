@@ -962,6 +962,32 @@ test_bdfs_blend_persist_has_conf_dir() {
     grep -q '/etc/iwt' "$IWT_ROOT/storage/setup-bdfs.sh"
 }
 
+test_bdfs_share_has_dedup_check() {
+    grep -q 'already registered' "$IWT_ROOT/storage/setup-bdfs.sh"
+}
+
+test_bdfs_state_dir_is_persistent() {
+    grep -q 'IWT_BDFS_STATE_DIR' "$IWT_ROOT/storage/setup-bdfs.sh"
+    grep -q '/var/lib/iwt/bdfs' "$IWT_ROOT/storage/setup-bdfs.sh"
+}
+
+test_config_default_has_bdfs_state_dir() {
+    local tmp_config
+    tmp_config=$(mktemp)
+    rm "$tmp_config"
+    IWT_CONFIG_FILE="$tmp_config" "$IWT_ROOT/cli/iwt.sh" config init 2>/dev/null
+    grep -q 'IWT_BDFS_STATE_DIR' "$tmp_config"
+    rm -f "$tmp_config"
+}
+
+test_bdfs_blend_persist_uses_service_template() {
+    grep -q 'iwt-bdfs-blend-mount@' "$IWT_ROOT/storage/setup-bdfs.sh"
+}
+
+test_bdfs_install_blend_template_exists() {
+    grep -q 'cmd_install_blend_template()' "$IWT_ROOT/storage/setup-bdfs.sh"
+}
+
 test_bdfs_blend_persist_generates_systemd_unit() {
     grep -q 'systemd-escape' "$IWT_ROOT/storage/setup-bdfs.sh"
     grep -q '\.mount' "$IWT_ROOT/storage/setup-bdfs.sh"
@@ -2059,7 +2085,12 @@ run_unit_tests() {
     run_test "bdfs blend mount writes state file"      test_bdfs_blend_mount_writes_state
     run_test "bdfs remount-all uses stored UUIDs"      test_bdfs_remount_all_uses_stored_uuids
     run_test "bdfs blend-persist conf dir"             test_bdfs_blend_persist_has_conf_dir
+    run_test "bdfs blend-persist uses service template" test_bdfs_blend_persist_uses_service_template
+    run_test "bdfs install-blend-template exists"      test_bdfs_install_blend_template_exists
     run_test "bdfs blend-persist generates .mount"     test_bdfs_blend_persist_generates_systemd_unit
+    run_test "bdfs share has dedup check"              test_bdfs_share_has_dedup_check
+    run_test "bdfs state dir is persistent"            test_bdfs_state_dir_is_persistent
+    run_test "Config default IWT_BDFS_STATE_DIR"       test_config_default_has_bdfs_state_dir
     run_test "bdfs install-units generates service"    test_bdfs_install_units_generates_service
     run_test "bdfs status shows blend namespaces"      test_bdfs_status_shows_blend_namespaces
     run_test "bdfs status shows shares cross-ref"      test_bdfs_status_shows_shares_cross_ref
@@ -2070,6 +2101,11 @@ run_unit_tests() {
     run_test "TUI bdfs has remount-all"                test_tui_bdfs_has_remount_all
     run_test "TUI bdfs has blend-persist"              test_tui_bdfs_has_blend_persist
     run_test "TUI bdfs has install-units"              test_tui_bdfs_has_install_units
+
+    # --- bdfs stub integration ---
+    echo ""
+    run_bdfs_stub_tests
+    echo ""
 
     # --- lib.sh helpers ---
     run_test "lib check_btrfs_host"            test_lib_has_check_btrfs_host
@@ -2373,6 +2409,282 @@ run_lint() {
     bold "Lint"
     echo ""
     run_test "shellcheck" test_shellcheck
+}
+
+# --- bdfs stub-based integration tests ---
+# These tests run setup-bdfs.sh with fake bdfs/incus/mountpoint/systemctl
+# binaries injected via PATH so no real infrastructure is required.
+
+_bdfs_stub_setup() {
+    # Create a temp directory with stub binaries on PATH
+    local stub_dir
+    stub_dir=$(mktemp -d)
+
+    # bdfs stub: always succeeds, prints minimal output
+    cat > "${stub_dir}/bdfs" <<'STUB'
+#!/usr/bin/env bash
+case "${1:-}" in
+    partition) echo "uuid=test-btrfs-uuid label=test type=btrfs-backed" ;;
+    blend)     echo "blend mounted" ;;
+    export)    echo "exported" ;;
+    import)    echo "imported" ;;
+    snapshot)  echo "snapshot created" ;;
+    demote)    echo "demoted" ;;
+    promote)   echo "promoted" ;;
+    status)    echo "bdfs status ok" ;;
+    --version) echo "bdfs 0.1.0-stub" ;;
+esac
+exit 0
+STUB
+    chmod +x "${stub_dir}/bdfs"
+
+    # bdfs_daemon stub
+    cat > "${stub_dir}/bdfs_daemon" <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+    chmod +x "${stub_dir}/bdfs_daemon"
+
+    # pgrep stub: reports bdfs_daemon as running
+    cat > "${stub_dir}/pgrep" <<'STUB'
+#!/usr/bin/env bash
+[[ "${*}" == *bdfs_daemon* ]] && echo "12345" && exit 0
+exit 1
+STUB
+    chmod +x "${stub_dir}/pgrep"
+
+    # incus stub: minimal responses
+    cat > "${stub_dir}/incus" <<'STUB'
+#!/usr/bin/env bash
+case "${1:-}" in
+    info)
+        if [[ "${2:-}" == "nonexistent-vm" ]]; then exit 1; fi
+        echo "Name: ${2:-test-vm}"
+        echo "Status: Running"
+        exit 0
+        ;;
+    config)
+        # 'incus config device show <vm>' — return empty (no devices)
+        exit 0
+        ;;
+    file)
+        exit 0
+        ;;
+    exec)
+        exit 0
+        ;;
+esac
+exit 0
+STUB
+    chmod +x "${stub_dir}/incus"
+
+    # mountpoint stub: /mnt/blend is mounted, everything else is not
+    cat > "${stub_dir}/mountpoint" <<'STUB'
+#!/usr/bin/env bash
+[[ "${*}" == *"/mnt/blend"* ]] && exit 0
+exit 1
+STUB
+    chmod +x "${stub_dir}/mountpoint"
+
+    # systemctl stub: always succeeds
+    cat > "${stub_dir}/systemctl" <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+    chmod +x "${stub_dir}/systemctl"
+
+    # sudo stub: just run the command without elevation
+    cat > "${stub_dir}/sudo" <<'STUB'
+#!/usr/bin/env bash
+exec "$@"
+STUB
+    chmod +x "${stub_dir}/sudo"
+
+    # lsmod stub: report btrfs_dwarfs as loaded
+    cat > "${stub_dir}/lsmod" <<'STUB'
+#!/usr/bin/env bash
+echo "btrfs_dwarfs           65536  0"
+STUB
+    chmod +x "${stub_dir}/lsmod"
+
+    # btrfs stub: always succeeds
+    cat > "${stub_dir}/btrfs" <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+    chmod +x "${stub_dir}/btrfs"
+
+    # mkdwarfs stub: always succeeds
+    cat > "${stub_dir}/mkdwarfs" <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+    chmod +x "${stub_dir}/mkdwarfs"
+
+    # dwarfs stub: always succeeds
+    cat > "${stub_dir}/dwarfs" <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+    chmod +x "${stub_dir}/dwarfs"
+
+    # dwarfsck stub: always succeeds
+    cat > "${stub_dir}/dwarfsck" <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+    chmod +x "${stub_dir}/dwarfsck"
+
+    echo "$stub_dir"
+}
+
+_bdfs_stub_teardown() {
+    local stub_dir="$1" state_dir="$2"
+    rm -rf "$stub_dir" "$state_dir"
+}
+
+# Run setup-bdfs.sh with stubs on PATH and a temp state dir
+_bdfs_run() {
+    local stub_dir="$1" state_dir="$2"
+    shift 2
+    PATH="${stub_dir}:${PATH}" \
+    IWT_BDFS_STATE_DIR="$state_dir" \
+    IWT_BDFS_RUNTIME="$state_dir" \
+        "$IWT_ROOT/storage/setup-bdfs.sh" "$@" 2>&1
+}
+
+test_bdfs_integ_check_passes_with_stubs() {
+    local stub_dir state_dir
+    stub_dir=$(_bdfs_stub_setup)
+    state_dir=$(mktemp -d)
+    local output
+    output=$(_bdfs_run "$stub_dir" "$state_dir" check 2>&1)
+    local rc=$?
+    _bdfs_stub_teardown "$stub_dir" "$state_dir"
+    # check exits 0 when all required tools are present
+    [[ $rc -eq 0 ]]
+}
+
+test_bdfs_integ_share_writes_state() {
+    local stub_dir state_dir
+    stub_dir=$(_bdfs_stub_setup)
+    state_dir=$(mktemp -d)
+    # Pre-create a blend state file so UUID auto-population works
+    echo "btrfs-test-uuid|dwarfs-test-uuid|/mnt/blend|false" \
+        > "${state_dir}/blend-_mnt_blend.state"
+    _bdfs_run "$stub_dir" "$state_dir" share \
+        --blend-mount /mnt/blend --vm test-vm --name test-share > /dev/null 2>&1
+    local rc=$?
+    local state_written=false
+    [[ -f "${state_dir}/shares.state" ]] && state_written=true
+    _bdfs_stub_teardown "$stub_dir" "$state_dir"
+    [[ $rc -eq 0 && "$state_written" == true ]]
+}
+
+test_bdfs_integ_share_dedup_rejected() {
+    local stub_dir state_dir
+    stub_dir=$(_bdfs_stub_setup)
+    state_dir=$(mktemp -d)
+    echo "blend-test-blend-mount|test-vm|test-share|none|uuid1|uuid2" \
+        > "${state_dir}/shares.state"
+    local output
+    output=$(_bdfs_run "$stub_dir" "$state_dir" share \
+        --blend-mount /mnt/blend --vm test-vm --name test-share 2>&1)
+    local rc=$?
+    _bdfs_stub_teardown "$stub_dir" "$state_dir"
+    # Must fail with a clear message
+    [[ $rc -ne 0 ]] && echo "$output" | grep -q 'already registered'
+}
+
+test_bdfs_integ_list_shares_parses_state() {
+    local stub_dir state_dir
+    stub_dir=$(_bdfs_stub_setup)
+    state_dir=$(mktemp -d)
+    echo "/mnt/blend|test-vm|my-share|none|btrfs-uuid|dwarfs-uuid" \
+        > "${state_dir}/shares.state"
+    local output
+    output=$(_bdfs_run "$stub_dir" "$state_dir" list-shares 2>&1)
+    _bdfs_stub_teardown "$stub_dir" "$state_dir"
+    echo "$output" | grep -q 'my-share'
+}
+
+test_bdfs_integ_unshare_removes_state() {
+    local stub_dir state_dir
+    stub_dir=$(_bdfs_stub_setup)
+    state_dir=$(mktemp -d)
+    echo "/mnt/blend|test-vm|my-share|none|uuid1|uuid2" \
+        > "${state_dir}/shares.state"
+    _bdfs_run "$stub_dir" "$state_dir" unshare \
+        --vm test-vm --name my-share > /dev/null 2>&1
+    # grep -c returns 0 (no match) or 1+ (match found); file may be empty after unshare
+    local remaining=0
+    if [[ -f "${state_dir}/shares.state" ]]; then
+        remaining=$(grep -c "my-share" "${state_dir}/shares.state" 2>/dev/null) || remaining=0
+    fi
+    _bdfs_stub_teardown "$stub_dir" "$state_dir"
+    [[ "$remaining" -eq 0 ]]
+}
+
+test_bdfs_integ_remount_all_no_state() {
+    local stub_dir state_dir
+    stub_dir=$(_bdfs_stub_setup)
+    state_dir=$(mktemp -d)
+    local output
+    output=$(_bdfs_run "$stub_dir" "$state_dir" remount-all 2>&1)
+    local rc=$?
+    _bdfs_stub_teardown "$stub_dir" "$state_dir"
+    [[ $rc -eq 0 ]] && echo "$output" | grep -q 'No registered'
+}
+
+test_bdfs_integ_remount_all_dry_run() {
+    local stub_dir state_dir
+    stub_dir=$(_bdfs_stub_setup)
+    state_dir=$(mktemp -d)
+    echo "/mnt/blend|test-vm|my-share|none|btrfs-uuid|dwarfs-uuid" \
+        > "${state_dir}/shares.state"
+    local output
+    output=$(_bdfs_run "$stub_dir" "$state_dir" remount-all --dry-run 2>&1)
+    local rc=$?
+    _bdfs_stub_teardown "$stub_dir" "$state_dir"
+    # dry-run must exit 0 and mention dry-run
+    [[ $rc -eq 0 ]] && echo "$output" | grep -qi 'dry.run\|dry_run\|already ok\|re-attach'
+}
+
+test_bdfs_integ_demote_run_rejects_unmounted() {
+    local stub_dir state_dir
+    stub_dir=$(_bdfs_stub_setup)
+    state_dir=$(mktemp -d)
+    local output
+    output=$(_bdfs_run "$stub_dir" "$state_dir" demote-run \
+        --blend-mount /nonexistent/unmounted 2>&1)
+    local rc=$?
+    _bdfs_stub_teardown "$stub_dir" "$state_dir"
+    [[ $rc -ne 0 ]]
+}
+
+test_bdfs_integ_status_runs_without_error() {
+    local stub_dir state_dir
+    stub_dir=$(_bdfs_stub_setup)
+    state_dir=$(mktemp -d)
+    local output
+    output=$(_bdfs_run "$stub_dir" "$state_dir" status 2>&1)
+    local rc=$?
+    _bdfs_stub_teardown "$stub_dir" "$state_dir"
+    [[ $rc -eq 0 ]] && echo "$output" | grep -q 'bdfs Status'
+}
+
+run_bdfs_stub_tests() {
+    bold "bdfs Stub Integration Tests"
+    echo ""
+    run_test "bdfs check with stubs"              test_bdfs_integ_check_passes_with_stubs
+    run_test "bdfs share writes shares.state"     test_bdfs_integ_share_writes_state
+    run_test "bdfs share dedup rejected"          test_bdfs_integ_share_dedup_rejected
+    run_test "bdfs list-shares parses state"      test_bdfs_integ_list_shares_parses_state
+    run_test "bdfs unshare removes state entry"   test_bdfs_integ_unshare_removes_state
+    run_test "bdfs remount-all no state"          test_bdfs_integ_remount_all_no_state
+    run_test "bdfs remount-all dry-run"           test_bdfs_integ_remount_all_dry_run
+    run_test "bdfs demote-run rejects unmounted"  test_bdfs_integ_demote_run_rejects_unmounted
+    run_test "bdfs status runs without error"     test_bdfs_integ_status_runs_without_error
 }
 
 run_integration_tests() {

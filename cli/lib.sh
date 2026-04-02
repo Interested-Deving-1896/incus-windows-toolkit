@@ -401,6 +401,10 @@ IWT_BDFS_COMPRESSION=zstd
 
 # Default blend namespace mount point used by 'iwt vm storage bdfs-blend mount'.
 IWT_BDFS_BLEND_MOUNT=/mnt/iwt-blend
+
+# Persistent state directory for bdfs shares.state (survives reboots).
+# Blend state files (ephemeral, recreated on each mount) use /run/iwt/bdfs.
+IWT_BDFS_STATE_DIR=/var/lib/iwt/bdfs
 EOF
 
     ok "Config created: $IWT_CONFIG_FILE"
