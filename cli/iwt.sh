@@ -198,6 +198,46 @@ cmd_doctor() {
         warn "  bdfs_daemon not running (optional; start with: iwt vm storage bdfs-daemon start)"
     fi
 
+    # Check shares.state for stale entries (blend not mounted or VM not running)
+    local bdfs_state_file="${IWT_BDFS_RUNTIME:-/run/iwt/bdfs}/shares.state"
+    if [[ -f "$bdfs_state_file" && -s "$bdfs_state_file" ]]; then
+        local stale_count=0
+        while IFS='|' read -r blend_mount vm_name share_name _rest; do
+            [[ -n "$share_name" ]] || continue
+            if ! mountpoint -q "$blend_mount" 2>/dev/null; then
+                warn "  Stale bdfs share '$share_name': blend not mounted at $blend_mount"
+                warn "    Remount: iwt vm storage bdfs-blend mount --mountpoint $blend_mount ..."
+                stale_count=$((stale_count + 1))
+            fi
+            if ! incus info "$vm_name" &>/dev/null 2>&1; then
+                warn "  Stale bdfs share '$share_name': VM '$vm_name' not found"
+                warn "    Clean up: iwt vm storage bdfs-unshare --vm $vm_name --name $share_name"
+                stale_count=$((stale_count + 1))
+            elif ! incus config device show "$vm_name" 2>/dev/null | grep -q "^${share_name}:"; then
+                warn "  Stale bdfs share '$share_name': not attached to VM '$vm_name' (state file out of sync)"
+                warn "    Clean up: iwt vm storage bdfs-unshare --vm $vm_name --name $share_name"
+                stale_count=$((stale_count + 1))
+            fi
+        done < "$bdfs_state_file"
+        if [[ $stale_count -eq 0 ]]; then
+            ok "  bdfs shares.state: all entries healthy"
+            ok_count=$((ok_count + 1))
+        else
+            fail_count=$((fail_count + stale_count))
+        fi
+    fi
+
+    # Check demote timers are active if shares exist
+    if [[ -f "$bdfs_state_file" && -s "$bdfs_state_file" ]]; then
+        if systemctl list-timers "iwt-bdfs-demote*" --no-pager 2>/dev/null | grep -q "iwt-bdfs-demote"; then
+            ok "  bdfs demote timer(s) active"
+            ok_count=$((ok_count + 1))
+        else
+            warn "  No bdfs demote timer found — BTRFS upper layer may grow unbounded"
+            warn "    Schedule one: iwt vm storage bdfs-demote-schedule --blend-mount <path> --interval 24h"
+        fi
+    fi
+
     # --- EROFS checks ---
     echo ""
     info "EROFS image format (IWT_IMAGE_FORMAT=${IWT_IMAGE_FORMAT:-dwarfs}):"
@@ -648,6 +688,12 @@ cmd_vm_storage() {
         bdfs-list-shares)
             exec "$IWT_ROOT/storage/setup-bdfs.sh" list-shares "$@"
             ;;
+        bdfs-demote-schedule)
+            exec "$IWT_ROOT/storage/setup-bdfs.sh" demote-schedule "$@"
+            ;;
+        bdfs-demote-run)
+            exec "$IWT_ROOT/storage/setup-bdfs.sh" demote-run "$@"
+            ;;
 
         # EROFS subcommands
         erofs-pack)
@@ -731,10 +777,12 @@ bdfs subcommands (btrfs-dwarfs-framework hybrid storage):
   bdfs-snapshot     CoW snapshot of a DwarFS image's BTRFS container
   bdfs-promote      Make a DwarFS-backed path writable (extract to BTRFS)
   bdfs-demote       Compress a BTRFS subvolume into a DwarFS image
-  bdfs-share        Expose a blend namespace to a Windows VM via virtiofs
-  bdfs-unshare      Remove a blend virtiofs share from a VM
-  bdfs-list-shares  List active bdfs virtiofs shares
-  bdfs-status       Show bdfs partition and blend status
+  bdfs-share            Expose a blend namespace to a Windows VM via virtiofs
+  bdfs-unshare          Remove a blend virtiofs share from a VM
+  bdfs-list-shares      List active bdfs virtiofs shares
+  bdfs-demote-schedule  Install/remove systemd timer for automatic demote
+  bdfs-demote-run       Run a single demote pass (invoked by the timer)
+  bdfs-status           Show bdfs partition and blend status
   bdfs-daemon       start|stop|status bdfs_daemon
   bdfs-check        Verify bdfs host prerequisites
 

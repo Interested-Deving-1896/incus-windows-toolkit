@@ -608,6 +608,190 @@ cmd_check() {
     [[ $fail_count -eq 0 ]]
 }
 
+# --- Scheduled demote ---
+
+cmd_demote_schedule() {
+    local blend_mount="" compression="${IWT_BDFS_COMPRESSION:-zstd}" \
+          interval="24h" delete_subvol=false action="enable" timer_name=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --blend-mount)   blend_mount="$2";   shift 2 ;;
+            --interval)      interval="$2";      shift 2 ;;
+            --compression)   compression="$2";   shift 2 ;;
+            --delete-subvol) delete_subvol=true; shift   ;;
+            --disable)       action="disable";   shift   ;;
+            --status)        action="status";    shift   ;;
+            --help|-h)       _usage_demote_schedule; exit 0 ;;
+            *) die "Unknown option: $1" ;;
+        esac
+    done
+
+    # Derive a stable timer name from the blend mount path
+    timer_name="iwt-bdfs-demote$(echo "${blend_mount:-default}" | tr '/' '-' | tr -s '-')"
+
+    case "$action" in
+        enable)
+            [[ -n "$blend_mount" ]] || die "--blend-mount is required"
+
+            echo ""
+            bold "bdfs demote-schedule: enable"
+            info "Blend mount:  $blend_mount"
+            info "Interval:     $interval"
+            info "Compression:  $compression"
+            info "Delete subvol: $delete_subvol"
+            echo ""
+
+            # Convert interval to systemd OnUnitActiveSec format
+            # Accept: 1h, 6h, 24h, 7d, @daily, @weekly
+            local systemd_interval="$interval"
+            case "$interval" in
+                @hourly)  systemd_interval="1h" ;;
+                @daily)   systemd_interval="24h" ;;
+                @weekly)  systemd_interval="168h" ;;
+            esac
+
+            local delete_flag=""
+            [[ "$delete_subvol" == true ]] && delete_flag="--delete-subvol"
+
+            # Write the systemd service unit
+            local service_file="/etc/systemd/system/${timer_name}.service"
+            sudo tee "$service_file" > /dev/null <<EOF
+[Unit]
+Description=IWT bdfs scheduled demote: ${blend_mount}
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=$IWT_ROOT/storage/setup-bdfs.sh demote-run --blend-mount ${blend_mount} --compression ${compression} ${delete_flag}
+StandardOutput=journal
+StandardError=journal
+EOF
+
+            # Write the systemd timer unit
+            local timer_file="/etc/systemd/system/${timer_name}.timer"
+            sudo tee "$timer_file" > /dev/null <<EOF
+[Unit]
+Description=IWT bdfs scheduled demote timer: ${blend_mount}
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=${systemd_interval}
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
+            sudo systemctl daemon-reload
+            sudo systemctl enable --now "${timer_name}.timer"
+
+            ok "Scheduled demote enabled: ${timer_name}.timer (every ${interval})"
+            info "View logs: journalctl -u ${timer_name}.service"
+            info "Run now:   sudo systemctl start ${timer_name}.service"
+            ;;
+
+        disable)
+            [[ -n "$blend_mount" ]] || die "--blend-mount is required"
+            sudo systemctl disable --now "${timer_name}.timer" 2>/dev/null || true
+            sudo rm -f "/etc/systemd/system/${timer_name}.service" \
+                       "/etc/systemd/system/${timer_name}.timer"
+            sudo systemctl daemon-reload
+            ok "Scheduled demote disabled and removed: $timer_name"
+            ;;
+
+        status)
+            echo ""
+            bold "bdfs demote timers:"
+            echo ""
+            systemctl list-timers "iwt-bdfs-demote*" --no-pager 2>/dev/null || \
+                info "No bdfs demote timers found"
+            ;;
+    esac
+}
+
+# Run a single demote pass over all subvolumes in a blend mount that have
+# accumulated writes on the BTRFS upper layer since the last demote.
+cmd_demote_run() {
+    local blend_mount="" compression="${IWT_BDFS_COMPRESSION:-zstd}" delete_subvol=false
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --blend-mount)   blend_mount="$2";   shift 2 ;;
+            --compression)   compression="$2";   shift 2 ;;
+            --delete-subvol) delete_subvol=true; shift   ;;
+            --help|-h) echo "Usage: setup-bdfs.sh demote-run --blend-mount PATH [--compression ALG] [--delete-subvol]"; exit 0 ;;
+            *) die "Unknown option: $1" ;;
+        esac
+    done
+
+    [[ -n "$blend_mount" ]] || die "--blend-mount is required"
+    mountpoint -q "$blend_mount" 2>/dev/null || die "Blend namespace not mounted at: $blend_mount"
+
+    _require_bdfs
+
+    info "Running scheduled demote on $blend_mount ..."
+
+    local demoted=0 skipped=0
+
+    # Iterate over top-level BTRFS subvolumes in the blend upper layer that
+    # have been modified since the last demote (mtime newer than the state file).
+    local state_dir="${IWT_BDFS_RUNTIME:-/run/iwt/bdfs}"
+    local stamp_file
+    stamp_file="${state_dir}/demote-last-run-$(echo "$blend_mount" | tr '/' '_')"
+    mkdir -p "$state_dir"
+
+    while IFS= read -r subvol_path; do
+        [[ -n "$subvol_path" ]] || continue
+
+        # Skip if nothing changed since last run
+        if [[ -f "$stamp_file" ]] && ! find "$subvol_path" -newer "$stamp_file" -maxdepth 1 -print -quit 2>/dev/null | grep -q .; then
+            skipped=$((skipped + 1))
+            continue
+        fi
+
+        local image_name
+        image_name="$(basename "$subvol_path")-auto-$(date +%Y%m%d-%H%M%S)"
+
+        info "  Demoting: $subvol_path → $image_name"
+
+        local args=(--blend-path "$subvol_path" --image-name "$image_name" --compression "$compression")
+        [[ "$delete_subvol" == true ]] && args+=(--delete-subvol)
+
+        if bdfs demote "${args[@]}" 2>&1 | while IFS= read -r l; do info "    $l"; done; then
+            demoted=$((demoted + 1))
+        else
+            warn "  Demote failed for $subvol_path — skipping"
+        fi
+    done < <(btrfs subvolume list -o "$blend_mount" 2>/dev/null | awk '{print $NF}' | sed "s|^|${blend_mount}/|")
+
+    touch "$stamp_file"
+    ok "Scheduled demote complete: $demoted demoted, $skipped unchanged"
+}
+
+_usage_demote_schedule() {
+    cat <<EOF
+iwt vm storage bdfs-demote-schedule - Schedule automatic recompression of BTRFS upper layer writes
+
+As Windows writes through the virtiofs share, changes accumulate on the BTRFS
+upper layer. This command installs a systemd timer that periodically runs
+bdfs-demote on modified subvolumes to recompress them back to DwarFS.
+
+Options:
+  --blend-mount PATH   Blend namespace mountpoint to demote  (required)
+  --interval INTERVAL  How often to run: 1h, 6h, 24h, 7d, @daily, @weekly (default: 24h)
+  --compression ALG    zstd | lz4 | zlib  (default: IWT_BDFS_COMPRESSION or zstd)
+  --delete-subvol      Remove BTRFS subvolume after demoting (reclaims space immediately)
+  --disable            Remove the timer for this blend mount
+  --status             List all active bdfs demote timers
+
+Examples:
+  iwt vm storage bdfs-demote-schedule --blend-mount /mnt/blend --interval 24h --delete-subvol
+  iwt vm storage bdfs-demote-schedule --blend-mount /mnt/blend --status
+  iwt vm storage bdfs-demote-schedule --blend-mount /mnt/blend --disable
+EOF
+}
+
 # --- Share / unshare blend namespace with a Windows VM ---
 
 cmd_share() {
@@ -818,6 +1002,8 @@ Subcommands:
   share                               Expose a blend namespace to a Windows VM via virtiofs
   unshare                             Remove a blend virtiofs share from a VM
   list-shares                         List active bdfs virtiofs shares
+  demote-schedule                     Install/remove a systemd timer for automatic demote
+  demote-run                          Run a single demote pass (used by the timer)
   status                              Show bdfs partition/blend status
   daemon       start|stop|status      Manage bdfs_daemon
   check                               Verify host prerequisites
@@ -840,10 +1026,12 @@ case "$subcmd" in
     snapshot)     cmd_snapshot    "$@" ;;
     promote)      cmd_promote     "$@" ;;
     demote)       cmd_demote      "$@" ;;
-    share)        cmd_share       "$@" ;;
-    unshare)      cmd_unshare     "$@" ;;
-    list-shares)  cmd_list_shares "$@" ;;
-    status)       cmd_status      "$@" ;;
+    share)            cmd_share            "$@" ;;
+    unshare)          cmd_unshare          "$@" ;;
+    list-shares)      cmd_list_shares      "$@" ;;
+    demote-schedule)  cmd_demote_schedule  "$@" ;;
+    demote-run)       cmd_demote_run       "$@" ;;
+    status)           cmd_status           "$@" ;;
     daemon)       cmd_daemon      "$@" ;;
     check)        cmd_check       "$@" ;;
     help|--help|-h) usage ;;

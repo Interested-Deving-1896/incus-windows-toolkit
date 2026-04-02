@@ -97,6 +97,7 @@ menu_main() {
             "vm"        "Manage Windows VMs" \
             "fleet"     "Multi-VM orchestration" \
             "image"     "Build & download Windows images" \
+            "bdfs"      "bdfs hybrid BTRFS+DwarFS storage" \
             "profiles"  "Manage Incus profiles" \
             "doctor"    "Check prerequisites" \
             "config"    "IWT configuration" \
@@ -106,6 +107,7 @@ menu_main() {
             vm)       menu_vm ;;
             fleet)    menu_fleet ;;
             image)    menu_image ;;
+            bdfs)     menu_bdfs ;;
             profiles) menu_profiles ;;
             doctor)   _run_cmd "Doctor" "$IWT_CMD" doctor ;;
             config)   menu_config ;;
@@ -130,6 +132,7 @@ menu_vm() {
             "monitor"     "Resource monitoring and stats" \
             "snapshot"    "Manage snapshots" \
             "share"       "Manage shared folders" \
+            "bdfs"        "bdfs hybrid BTRFS+DwarFS storage" \
             "gpu"         "Manage GPU passthrough" \
             "usb"         "Manage USB devices" \
             "net"         "Manage networking" \
@@ -147,6 +150,7 @@ menu_vm() {
             monitor)     menu_monitor ;;
             snapshot)    menu_snapshot ;;
             share)       menu_share ;;
+            bdfs)        menu_bdfs ;;
             gpu)         menu_gpu ;;
             usb)         menu_usb ;;
             net)         menu_net ;;
@@ -753,6 +757,261 @@ menu_profiles() {
 }
 
 # --- Config Menu ---
+
+menu_bdfs() {
+    while true; do
+        local choice
+        choice=$(_dlg_menu "bdfs Hybrid Storage" "BTRFS+DwarFS framework — select an action:" \
+            "check"           "Check bdfs prerequisites" \
+            "daemon"          "Manage bdfs_daemon" \
+            "partition"       "Manage bdfs partitions" \
+            "blend"           "Manage blend namespace" \
+            "share"           "Share blend namespace with a VM" \
+            "list-shares"     "List active bdfs shares" \
+            "export"          "Export BTRFS subvolume to DwarFS image" \
+            "import"          "Import DwarFS image to BTRFS subvolume" \
+            "snapshot"        "Snapshot a DwarFS image container" \
+            "promote-demote"  "Promote / demote blend paths" \
+            "demote-schedule" "Schedule automatic demote" \
+            "status"          "Show bdfs status" \
+            "back"            "Back") || break
+
+        case "$choice" in
+            check)
+                _run_cmd "bdfs Check" "$IWT_CMD" vm storage bdfs-check
+                ;;
+
+            daemon)
+                local dchoice
+                dchoice=$(_dlg_menu "bdfs Daemon" "Select action:" \
+                    "status"  "Show daemon status" \
+                    "start"   "Start bdfs_daemon" \
+                    "stop"    "Stop bdfs_daemon" \
+                    "enable"  "Enable at boot" \
+                    "disable" "Disable at boot") || continue
+                _run_cmd "bdfs Daemon" "$IWT_CMD" vm storage bdfs-daemon "$dchoice"
+                ;;
+
+            partition)
+                local pchoice
+                pchoice=$(_dlg_menu "bdfs Partitions" "Select action:" \
+                    "list"   "List partitions" \
+                    "add"    "Register a partition" \
+                    "remove" "Remove a partition") || continue
+                case "$pchoice" in
+                    list)
+                        _run_cmd "Partitions" "$IWT_CMD" vm storage bdfs-partition list
+                        ;;
+                    add)
+                        local ptype pdevice plabel pmount
+                        ptype=$(_dlg_menu "Partition Type" "Select type:" \
+                            "dwarfs-backed" "Stores BTRFS snapshots as DwarFS images" \
+                            "btrfs-backed"  "Stores DwarFS images on a BTRFS filesystem") || continue
+                        pdevice=$(_dlg_input "Add Partition" "Block device (e.g. /dev/sdb1):") || continue
+                        [[ -n "$pdevice" ]] || continue
+                        plabel=$(_dlg_input "Add Partition" "Label:") || continue
+                        [[ -n "$plabel" ]] || continue
+                        pmount=$(_dlg_input "Add Partition" "Mount point (e.g. /mnt/archive):") || continue
+                        [[ -n "$pmount" ]] || continue
+                        _run_cmd "Add Partition" "$IWT_CMD" vm storage bdfs-partition add \
+                            --type "$ptype" --device "$pdevice" --label "$plabel" --mount "$pmount"
+                        ;;
+                    remove)
+                        local puuid
+                        puuid=$(_dlg_input "Remove Partition" "Partition UUID:") || continue
+                        [[ -n "$puuid" ]] || continue
+                        if _dlg_yesno "Confirm" "Remove partition $puuid?"; then
+                            _run_cmd "Remove Partition" "$IWT_CMD" vm storage bdfs-partition remove "$puuid"
+                        fi
+                        ;;
+                esac
+                ;;
+
+            blend)
+                local bchoice
+                bchoice=$(_dlg_menu "Blend Namespace" "Select action:" \
+                    "mount"   "Mount blend namespace" \
+                    "umount"  "Unmount blend namespace") || continue
+                case "$bchoice" in
+                    mount)
+                        local buuid duuid bmount
+                        buuid=$(_dlg_input "Blend Mount" "BTRFS partition UUID:") || continue
+                        [[ -n "$buuid" ]] || continue
+                        duuid=$(_dlg_input "Blend Mount" "DwarFS partition UUID:") || continue
+                        [[ -n "$duuid" ]] || continue
+                        bmount=$(_dlg_input "Blend Mount" "Mountpoint:" "${IWT_BDFS_BLEND_MOUNT:-/mnt/iwt-blend}") || continue
+                        [[ -n "$bmount" ]] || continue
+                        local wb_args=()
+                        if _dlg_yesno "Writeback" "Enable virtiofs writeback cache? (higher throughput, less strict ordering)"; then
+                            wb_args=(--writeback)
+                        fi
+                        _run_cmd "Blend Mount" "$IWT_CMD" vm storage bdfs-blend mount \
+                            --btrfs-uuid "$buuid" --dwarfs-uuid "$duuid" \
+                            --mountpoint "$bmount" "${wb_args[@]}"
+                        ;;
+                    umount)
+                        local umount_path
+                        umount_path=$(_dlg_input "Blend Umount" "Mountpoint:" "${IWT_BDFS_BLEND_MOUNT:-/mnt/iwt-blend}") || continue
+                        [[ -n "$umount_path" ]] || continue
+                        _run_cmd "Blend Umount" "$IWT_CMD" vm storage bdfs-blend umount "$umount_path"
+                        ;;
+                esac
+                ;;
+
+            share)
+                local vm blend_path share_name
+                vm=$(_pick_vm) || continue
+                blend_path=$(_dlg_input "bdfs Share" "Blend mountpoint:" "${IWT_BDFS_BLEND_MOUNT:-/mnt/iwt-blend}") || continue
+                [[ -n "$blend_path" ]] || continue
+                share_name=$(_dlg_input "bdfs Share" "Share name (leave empty for auto):") || continue
+                local share_args=(--blend-mount "$blend_path" --vm "$vm")
+                [[ -n "$share_name" ]] && share_args+=(--name "$share_name")
+                _run_cmd "bdfs Share" "$IWT_CMD" vm storage bdfs-share "${share_args[@]}"
+
+                # Offer to push the auto-mount helper immediately
+                if _dlg_yesno "Auto-mount" "Push bdfs-mount-shares.ps1 to '$vm' so shares mount at logon?"; then
+                    _run_cmd "Guest Setup" "$IWT_CMD" vm setup-guest --vm "$vm" --mount-bdfs-shares
+                fi
+                ;;
+
+            list-shares)
+                _run_cmd "bdfs Shares" "$IWT_CMD" vm storage bdfs-list-shares
+                ;;
+
+            export)
+                local part_uuid subvol_id btrfs_mount img_name compression
+                part_uuid=$(_dlg_input "bdfs Export" "Partition UUID:") || continue
+                [[ -n "$part_uuid" ]] || continue
+                btrfs_mount=$(_dlg_input "bdfs Export" "BTRFS mount point:") || continue
+                [[ -n "$btrfs_mount" ]] || continue
+                subvol_id=$(_dlg_input "bdfs Export" "Subvolume ID (from: btrfs subvolume list $btrfs_mount):") || continue
+                [[ -n "$subvol_id" ]] || continue
+                img_name=$(_dlg_input "bdfs Export" "Image name:") || continue
+                [[ -n "$img_name" ]] || continue
+                compression=$(_dlg_menu "Compression" "Select algorithm:" \
+                    "zstd" "Recommended (fast + small)" \
+                    "lz4"  "Fastest" \
+                    "zlib" "Smallest") || continue
+                _run_cmd "bdfs Export" "$IWT_CMD" vm storage bdfs-export \
+                    --partition "$part_uuid" --subvol-id "$subvol_id" \
+                    --btrfs-mount "$btrfs_mount" --name "$img_name" \
+                    --compression "$compression" --verify
+                ;;
+
+            import)
+                local part_uuid img_id btrfs_mount subvol_name
+                part_uuid=$(_dlg_input "bdfs Import" "Partition UUID:") || continue
+                [[ -n "$part_uuid" ]] || continue
+                img_id=$(_dlg_input "bdfs Import" "Image ID:") || continue
+                [[ -n "$img_id" ]] || continue
+                btrfs_mount=$(_dlg_input "bdfs Import" "Destination BTRFS mount:") || continue
+                [[ -n "$btrfs_mount" ]] || continue
+                subvol_name=$(_dlg_input "bdfs Import" "New subvolume name:") || continue
+                [[ -n "$subvol_name" ]] || continue
+                _run_cmd "bdfs Import" "$IWT_CMD" vm storage bdfs-import \
+                    --partition "$part_uuid" --image-id "$img_id" \
+                    --btrfs-mount "$btrfs_mount" --subvol-name "$subvol_name"
+                ;;
+
+            snapshot)
+                local part_uuid img_id snap_name
+                part_uuid=$(_dlg_input "bdfs Snapshot" "Partition UUID:") || continue
+                [[ -n "$part_uuid" ]] || continue
+                img_id=$(_dlg_input "bdfs Snapshot" "Image ID:") || continue
+                [[ -n "$img_id" ]] || continue
+                snap_name=$(_dlg_input "bdfs Snapshot" "Snapshot name:") || continue
+                [[ -n "$snap_name" ]] || continue
+                local ro_args=()
+                if _dlg_yesno "Read-only" "Create as read-only snapshot?"; then
+                    ro_args=(--readonly)
+                fi
+                _run_cmd "bdfs Snapshot" "$IWT_CMD" vm storage bdfs-snapshot \
+                    --partition "$part_uuid" --image-id "$img_id" \
+                    --name "$snap_name" "${ro_args[@]}"
+                ;;
+
+            promote-demote)
+                local pdchoice
+                pdchoice=$(_dlg_menu "Promote / Demote" "Select action:" \
+                    "promote" "Make a DwarFS-backed path writable (extract to BTRFS)" \
+                    "demote"  "Compress a BTRFS subvolume into a DwarFS image") || continue
+                case "$pdchoice" in
+                    promote)
+                        local blend_path subvol_name
+                        blend_path=$(_dlg_input "Promote" "Blend path to promote:") || continue
+                        [[ -n "$blend_path" ]] || continue
+                        subvol_name=$(_dlg_input "Promote" "New BTRFS subvolume name:") || continue
+                        [[ -n "$subvol_name" ]] || continue
+                        _run_cmd "Promote" "$IWT_CMD" vm storage bdfs-promote \
+                            --blend-path "$blend_path" --subvol-name "$subvol_name"
+                        ;;
+                    demote)
+                        local blend_path img_name compression
+                        blend_path=$(_dlg_input "Demote" "Blend path to demote:") || continue
+                        [[ -n "$blend_path" ]] || continue
+                        img_name=$(_dlg_input "Demote" "Output DwarFS image name:") || continue
+                        [[ -n "$img_name" ]] || continue
+                        compression=$(_dlg_menu "Compression" "Select algorithm:" \
+                            "zstd" "Recommended" \
+                            "lz4"  "Fastest" \
+                            "zlib" "Smallest") || continue
+                        local del_args=()
+                        if _dlg_yesno "Delete subvol" "Delete BTRFS subvolume after demoting? (reclaims space)"; then
+                            del_args=(--delete-subvol)
+                        fi
+                        _run_cmd "Demote" "$IWT_CMD" vm storage bdfs-demote \
+                            --blend-path "$blend_path" --image-name "$img_name" \
+                            --compression "$compression" "${del_args[@]}"
+                        ;;
+                esac
+                ;;
+
+            demote-schedule)
+                local dschoice
+                dschoice=$(_dlg_menu "Demote Schedule" "Select action:" \
+                    "enable"  "Enable scheduled demote timer" \
+                    "disable" "Disable scheduled demote timer" \
+                    "status"  "Show active demote timers") || continue
+                case "$dschoice" in
+                    enable)
+                        local blend_path interval
+                        blend_path=$(_dlg_input "Demote Schedule" "Blend mountpoint:" \
+                            "${IWT_BDFS_BLEND_MOUNT:-/mnt/iwt-blend}") || continue
+                        [[ -n "$blend_path" ]] || continue
+                        interval=$(_dlg_menu "Interval" "How often to demote:" \
+                            "6h"     "Every 6 hours" \
+                            "24h"    "Every 24 hours (recommended)" \
+                            "168h"   "Weekly" \
+                            "@daily" "Daily (systemd alias)") || continue
+                        local del_args=()
+                        if _dlg_yesno "Delete subvol" "Delete BTRFS subvolumes after demoting?"; then
+                            del_args=(--delete-subvol)
+                        fi
+                        _run_cmd "Enable Timer" "$IWT_CMD" vm storage bdfs-demote-schedule \
+                            --blend-mount "$blend_path" --interval "$interval" "${del_args[@]}"
+                        ;;
+                    disable)
+                        local blend_path
+                        blend_path=$(_dlg_input "Demote Schedule" "Blend mountpoint:" \
+                            "${IWT_BDFS_BLEND_MOUNT:-/mnt/iwt-blend}") || continue
+                        [[ -n "$blend_path" ]] || continue
+                        _run_cmd "Disable Timer" "$IWT_CMD" vm storage bdfs-demote-schedule \
+                            --blend-mount "$blend_path" --disable
+                        ;;
+                    status)
+                        _run_cmd "Timer Status" "$IWT_CMD" vm storage bdfs-demote-schedule --status
+                        ;;
+                esac
+                ;;
+
+            status)
+                _run_cmd "bdfs Status" "$IWT_CMD" vm storage bdfs-status
+                ;;
+
+            back) break ;;
+        esac
+    done
+}
 
 menu_config() {
     while true; do
