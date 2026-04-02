@@ -921,7 +921,7 @@ cmd_remount_all() {
         esac
     done
 
-    local state_file="${IWT_BDFS_RUNTIME:-/run/iwt/bdfs}/shares.state"
+    local state_file="${IWT_BDFS_STATE_DIR:-/var/lib/iwt/bdfs}/shares.state"
 
     if [[ ! -f "$state_file" || ! -s "$state_file" ]]; then
         info "No registered bdfs shares found (${state_file} is empty or missing)"
@@ -1050,49 +1050,45 @@ cmd_blend_persist() {
                 | sudo tee -a "$conf_file" > /dev/null
             ok "Blend entry added to $conf_file"
 
-            # Generate a systemd .mount unit for this blend
-            # systemd mount unit names must match the mount path with / → -
-            local unit_name
-            unit_name="$(systemd-escape --path "$mountpoint").mount"
-            local unit_file="/etc/systemd/system/${unit_name}"
+            # Install the parameterized blend-mount template if not present
+            _install_blend_mount_template
 
-            local wb_opts=""
-            [[ "$writeback" == true ]] && wb_opts=" --writeback"
+            # Instantiate the template for this mountpoint.
+            # systemd-escape --path turns /mnt/blend → mnt-blend
+            local escaped_mount
+            escaped_mount="$(systemd-escape --path "$mountpoint")"
+            local instance_unit="iwt-bdfs-blend-mount@${escaped_mount}.service"
 
-            sudo tee "$unit_file" > /dev/null <<EOF
-[Unit]
-Description=IWT bdfs blend namespace: ${mountpoint}
-Documentation=https://github.com/Interested-Deving-1896/incus-windows-toolkit
-After=bdfs_daemon.service network-online.target
-Requires=bdfs_daemon.service
-
-[Mount]
-What=bdfs-blend
-Where=${mountpoint}
-Type=fuse.bdfs
-Options=btrfs-uuid=${btrfs_uuid},dwarfs-uuid=${dwarfs_uuid}${wb_opts:+,writeback}
-ExecMount=${IWT_ROOT}/storage/setup-bdfs.sh blend mount --btrfs-uuid ${btrfs_uuid} --dwarfs-uuid ${dwarfs_uuid} --mountpoint ${mountpoint}${wb_opts}
-ExecUnmount=${IWT_ROOT}/storage/setup-bdfs.sh blend umount ${mountpoint}
-
-[Install]
-WantedBy=multi-user.target
+            # Write per-instance drop-in with the UUIDs and writeback flag so
+            # the template can read them via Environment=
+            local dropin_dir="/etc/systemd/system/${instance_unit}.d"
+            sudo mkdir -p "$dropin_dir"
+            local wb_flag="false"
+            [[ "$writeback" == true ]] && wb_flag="true"
+            sudo tee "${dropin_dir}/10-uuids.conf" > /dev/null <<EOF
+[Service]
+Environment="BDFS_BTRFS_UUID=${btrfs_uuid}"
+Environment="BDFS_DWARFS_UUID=${dwarfs_uuid}"
+Environment="BDFS_WRITEBACK=${wb_flag}"
+Environment="BDFS_MOUNTPOINT=${mountpoint}"
 EOF
 
             sudo systemctl daemon-reload
-            sudo systemctl enable "$unit_name"
-            ok "Systemd mount unit installed: $unit_name"
-            info "To mount now: sudo systemctl start $unit_name"
-            info "To view logs: journalctl -u $unit_name"
+            sudo systemctl enable "$instance_unit"
+            ok "Blend mount service installed: $instance_unit"
+            info "To mount now:  sudo systemctl start $instance_unit"
+            info "To view logs:  journalctl -u $instance_unit"
             ;;
 
         remove)
             [[ -n "$mountpoint" ]] || die "--mountpoint is required"
 
-            local unit_name
-            unit_name="$(systemd-escape --path "$mountpoint").mount"
+            local escaped_mount instance_unit
+            escaped_mount="$(systemd-escape --path "$mountpoint")"
+            instance_unit="iwt-bdfs-blend-mount@${escaped_mount}.service"
 
-            sudo systemctl disable --now "$unit_name" 2>/dev/null || true
-            sudo rm -f "/etc/systemd/system/${unit_name}"
+            sudo systemctl disable --now "$instance_unit" 2>/dev/null || true
+            sudo rm -rf "/etc/systemd/system/${instance_unit}.d"
             sudo systemctl daemon-reload
 
             if [[ -f "$conf_file" ]]; then
@@ -1131,6 +1127,95 @@ EOF
             die "Unknown action: $action. Use: add | remove | list"
             ;;
     esac
+}
+
+# Install the iwt-bdfs-blend-mount@.service template unit if not already present.
+# The template is parameterized by mountpoint (via systemd-escape); per-instance
+# UUIDs and flags are supplied via drop-in Environment= files.
+_install_blend_mount_template() {
+    local template_file="/etc/systemd/system/iwt-bdfs-blend-mount@.service"
+    [[ -f "$template_file" ]] && return 0  # already installed
+
+    sudo tee "$template_file" > /dev/null <<'UNIT'
+[Unit]
+Description=IWT bdfs blend namespace mount: %I
+Documentation=https://github.com/Interested-Deving-1896/incus-windows-toolkit
+After=network-online.target
+# bdfs_daemon must be running before we attempt to mount
+After=bdfs_daemon.service
+Requires=bdfs_daemon.service
+# Ensure the mountpoint directory exists
+ConditionPathIsDirectory=%f
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+
+# These are overridden by the per-instance drop-in (10-uuids.conf)
+Environment="BDFS_BTRFS_UUID="
+Environment="BDFS_DWARFS_UUID="
+Environment="BDFS_WRITEBACK=false"
+Environment="BDFS_MOUNTPOINT=%f"
+
+ExecStartPre=/bin/mkdir -p %f
+ExecStart=/bin/bash -c '\
+    args=(--btrfs-uuid "$BDFS_BTRFS_UUID" --dwarfs-uuid "$BDFS_DWARFS_UUID" --mountpoint "$BDFS_MOUNTPOINT"); \
+    [[ "$BDFS_WRITEBACK" == "true" ]] && args+=(--writeback); \
+    exec IWT_ROOT="$(dirname "$(readlink -f /etc/systemd/system/iwt-bdfs-blend-mount@.service)")" \
+        /bin/bash "$(dirname "$(readlink -f /etc/systemd/system/iwt-bdfs-blend-mount@.service)")/../storage/setup-bdfs.sh" \
+        blend mount "${args[@]}"'
+ExecStop=/bin/bash -c '\
+    exec IWT_ROOT="$(dirname "$(readlink -f /etc/systemd/system/iwt-bdfs-blend-mount@.service)")/.." \
+        /bin/bash "$(dirname "$(readlink -f /etc/systemd/system/iwt-bdfs-blend-mount@.service)")/../storage/setup-bdfs.sh" \
+        blend umount "$BDFS_MOUNTPOINT"'
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+    sudo systemctl daemon-reload
+}
+
+# Write the template unit with the correct IWT_ROOT path baked in.
+# Called by bdfs-install-units so the path is always accurate.
+cmd_install_blend_template() {
+    local template_file="/etc/systemd/system/iwt-bdfs-blend-mount@.service"
+
+    sudo tee "$template_file" > /dev/null <<EOF
+[Unit]
+Description=IWT bdfs blend namespace mount: %I
+Documentation=https://github.com/Interested-Deving-1896/incus-windows-toolkit
+After=network-online.target bdfs_daemon.service
+Requires=bdfs_daemon.service
+ConditionPathIsDirectory=%f
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+Environment="BDFS_BTRFS_UUID="
+Environment="BDFS_DWARFS_UUID="
+Environment="BDFS_WRITEBACK=false"
+Environment="BDFS_MOUNTPOINT=%f"
+ExecStartPre=/bin/mkdir -p %f
+ExecStart=${IWT_ROOT}/storage/setup-bdfs.sh blend mount \
+    --btrfs-uuid \$BDFS_BTRFS_UUID \
+    --dwarfs-uuid \$BDFS_DWARFS_UUID \
+    --mountpoint \$BDFS_MOUNTPOINT
+ExecStartPost=/bin/bash -c '[[ "\$BDFS_WRITEBACK" == "true" ]] && echo writeback || true'
+ExecStop=${IWT_ROOT}/storage/setup-bdfs.sh blend umount \$BDFS_MOUNTPOINT
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    sudo systemctl daemon-reload
+    ok "Template unit installed: $template_file"
+    info "Instantiate with: iwt vm storage bdfs-blend-persist add --btrfs-uuid ... --mountpoint ..."
 }
 
 _usage_blend_persist() {
@@ -1172,7 +1257,7 @@ Documentation=https://github.com/Interested-Deving-1896/incus-windows-toolkit
 # Run after Incus and the network are up so VMs can be queried
 After=network-online.target incus.service
 Wants=network-online.target
-ConditionPathExists=${IWT_BDFS_RUNTIME:-/run/iwt/bdfs}/shares.state
+ConditionPathExists=${IWT_BDFS_STATE_DIR:-/var/lib/iwt/bdfs}/shares.state
 
 [Service]
 Type=oneshot
@@ -1184,6 +1269,9 @@ StandardError=journal
 [Install]
 WantedBy=multi-user.target
 EOF
+
+            # Also install the blend-mount template so blend-persist works
+            cmd_install_blend_template
 
             sudo systemctl daemon-reload
             sudo systemctl enable iwt-bdfs-remount-all.service
@@ -1324,16 +1412,25 @@ cmd_share() {
 
     ok "Share '$share_name' attached to '$vm_name'"
 
-    # Persist state so bdfs-unshare, list-shares, and remount-all can use it.
-    # Auto-populate UUIDs from the blend state file written by bdfs-blend mount
-    # if the caller didn't supply them explicitly.
-    local state_dir="${IWT_BDFS_RUNTIME:-/run/iwt/bdfs}"
-    mkdir -p "$state_dir"
+    # Deduplication: reject if this vm+share combination is already registered.
+    local _existing_state="${IWT_BDFS_STATE_DIR:-/var/lib/iwt/bdfs}/shares.state"
+    if [[ -f "$_existing_state" ]] && \
+       grep -q "^[^|]*|${vm_name}|${share_name}|" "$_existing_state" 2>/dev/null; then
+        die "Share '$share_name' is already registered for VM '$vm_name'.\n  Use a different --name, or remove the existing entry first:\n  iwt vm storage bdfs-unshare --vm $vm_name --name $share_name"
+    fi
 
+    # Persist state so bdfs-unshare, list-shares, and remount-all can use it.
+    # shares.state lives in the persistent state dir (/var/lib/iwt/bdfs) so it
+    # survives reboots. Blend state files are ephemeral (/run/iwt/bdfs).
+    local persistent_dir="${IWT_BDFS_STATE_DIR:-/var/lib/iwt/bdfs}"
+    local runtime_dir="${IWT_BDFS_RUNTIME:-/run/iwt/bdfs}"
+    mkdir -p "$persistent_dir" "$runtime_dir"
+
+    # Auto-populate UUIDs from the blend state file if not supplied explicitly.
     if [[ -z "$btrfs_uuid" || -z "$dwarfs_uuid" ]]; then
         local blend_key blend_state
         blend_key="$(echo "$blend_mount" | tr '/' '_')"
-        blend_state="${state_dir}/blend-${blend_key}.state"
+        blend_state="${runtime_dir}/blend-${blend_key}.state"
         if [[ -f "$blend_state" ]]; then
             local _saved_btrfs _saved_dwarfs _saved_mp _saved_wb
             IFS='|' read -r _saved_btrfs _saved_dwarfs _saved_mp _saved_wb \
@@ -1344,7 +1441,7 @@ cmd_share() {
     fi
 
     echo "${blend_mount}|${vm_name}|${share_name}|${cache_mode}|${btrfs_uuid}|${dwarfs_uuid}" \
-        >> "${state_dir}/shares.state"
+        >> "${persistent_dir}/shares.state"
 
     # Push the share list into the VM immediately if it is running, so
     # bdfs-mount-shares.ps1 can discover shares without a separate
@@ -1358,7 +1455,7 @@ cmd_share() {
             > "$share_list_tmp"
         while IFS='|' read -r _blend _vm sname _rest; do
             [[ "$_vm" == "$vm_name" && -n "$sname" ]] && echo "$sname"
-        done < "${state_dir}/shares.state" >> "$share_list_tmp"
+        done < "${persistent_dir}/shares.state" >> "$share_list_tmp"
 
         if incus file push "$share_list_tmp" \
                "${vm_name}/C:/ProgramData/IWT/bdfs-shares.txt" 2>/dev/null; then
@@ -1445,7 +1542,7 @@ cmd_unshare() {
     fi
 
     # Remove from state file (matches on vm_name+share_name regardless of field count)
-    local state_file="${IWT_BDFS_RUNTIME:-/run/iwt/bdfs}/shares.state"
+    local state_file="${IWT_BDFS_STATE_DIR:-/var/lib/iwt/bdfs}/shares.state"
     if [[ -f "$state_file" ]]; then
         grep -v "^[^|]*|${vm_name}|${share_name}|" "$state_file" > "${state_file}.tmp" || true
         mv "${state_file}.tmp" "$state_file"
@@ -1461,7 +1558,7 @@ cmd_list_shares() {
     bold "Active bdfs Shares:"
     echo ""
 
-    local state_file="${IWT_BDFS_RUNTIME:-/run/iwt/bdfs}/shares.state"
+    local state_file="${IWT_BDFS_STATE_DIR:-/var/lib/iwt/bdfs}/shares.state"
     if [[ ! -f "$state_file" ]] || [[ ! -s "$state_file" ]]; then
         info "No active bdfs shares"
         return 0
@@ -1580,8 +1677,9 @@ case "$subcmd" in
     demote-schedule)  cmd_demote_schedule  "$@" ;;
     demote-run)       cmd_demote_run       "$@" ;;
     remount-all)      cmd_remount_all      "$@" ;;
-    blend-persist)    cmd_blend_persist    "$@" ;;
-    install-units)    cmd_install_units    "${1:-install}" ;;
+    blend-persist)         cmd_blend_persist      "$@" ;;
+    install-blend-template) cmd_install_blend_template ;;
+    install-units)         cmd_install_units      "${1:-install}" ;;
     uninstall-units)  cmd_install_units    "uninstall" ;;
     status)           cmd_status           "$@" ;;
     daemon)       cmd_daemon      "$@" ;;

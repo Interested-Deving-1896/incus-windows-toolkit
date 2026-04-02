@@ -199,7 +199,7 @@ cmd_doctor() {
     fi
 
     # Check shares.state for stale entries (blend not mounted or VM not running)
-    local bdfs_state_file="${IWT_BDFS_RUNTIME:-/run/iwt/bdfs}/shares.state"
+    local bdfs_state_file="${IWT_BDFS_STATE_DIR:-/var/lib/iwt/bdfs}/shares.state"
     if [[ -f "$bdfs_state_file" && -s "$bdfs_state_file" ]]; then
         local stale_count=0
         while IFS='|' read -r blend_mount vm_name share_name _cache _btrfs_uuid _dwarfs_uuid; do
@@ -699,6 +699,9 @@ cmd_vm_storage() {
             ;;
         bdfs-blend-persist)
             exec "$IWT_ROOT/storage/setup-bdfs.sh" blend-persist "$@"
+            ;;
+        bdfs-install-blend-template)
+            exec "$IWT_ROOT/storage/setup-bdfs.sh" install-blend-template
             ;;
         bdfs-install-units)
             exec "$IWT_ROOT/storage/setup-bdfs.sh" install-units "${2:-install}"
