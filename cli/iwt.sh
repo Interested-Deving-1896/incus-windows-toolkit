@@ -51,6 +51,7 @@ Commands:
   remoteapp   Launch Windows apps as seamless Linux windows
   tui         Launch interactive terminal UI
   dashboard   Launch web monitoring dashboard
+  publish         Create and manage Incus images from a Windows VM
   setup-rootless  Configure the system for rootless VM operation via incus-user
   update          Check for updates and self-update
   doctor          Check system prerequisites
@@ -59,6 +60,119 @@ Commands:
 
 Run 'iwt <command> --help' for details on each command.
 EOF
+}
+
+# ── publish ───────────────────────────────────────────────────────────────────
+
+cmd_publish() {
+    local subcmd="${1:-help}"; shift || true
+
+    case "$subcmd" in
+        create)  _cmd_publish_create "$@" ;;
+        list)    _cmd_publish_list   "$@" ;;
+        delete)  _cmd_publish_delete "$@" ;;
+        help|--help|-h)
+            cat <<EOF
+iwt publish — create and manage Incus images from Windows VMs
+
+Usage: iwt publish <subcommand> [options]
+
+Subcommands:
+  create   Publish a stopped VM as a reusable Incus image
+  list     List published Windows images
+  delete   Delete a published image by alias
+
+Examples:
+  iwt publish create --vm win11 --alias windows/golden
+  iwt publish list
+  iwt publish delete windows/golden
+EOF
+            ;;
+        *) die "Unknown publish subcommand: $subcmd. Run: iwt publish help" ;;
+    esac
+}
+
+_cmd_publish_create() {
+    local vm_name="${IWT_VM_NAME:-windows}"
+    local alias_name=""
+    local description=""
+    local force_stop=0
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --vm|-n)          vm_name="$2";     shift 2 ;;
+            --alias|-a)       alias_name="$2";  shift 2 ;;
+            --description|-d) description="$2"; shift 2 ;;
+            --force-stop)     force_stop=1;     shift ;;
+            --help|-h)
+                cat <<EOF
+iwt publish create — publish a Windows VM as a reusable Incus image
+
+Usage: iwt publish create [--vm NAME] [--alias ALIAS] [--force-stop]
+
+Options:
+  --vm NAME          VM name (default: \$IWT_VM_NAME or 'windows')
+  --alias ALIAS      Image alias (default: windows/<vm-name>)
+  --description DESC Image description
+  --force-stop       Stop the VM before publishing if running
+
+Examples:
+  iwt publish create
+  iwt publish create --vm win11 --alias windows/golden-v1
+  iwt publish create --force-stop
+EOF
+                return 0 ;;
+            *) die "Unknown option: $1. Run: iwt publish create --help" ;;
+        esac
+    done
+
+    source "$IWT_ROOT/remoteapp/backend/incus-backend.sh"
+    IWT_VM_NAME="$vm_name"
+    alias_name="${alias_name:-windows/${vm_name}}"
+
+    if ! vm_exists; then
+        die "VM '$vm_name' does not exist"
+    fi
+
+    if vm_is_running; then
+        if [[ "$force_stop" -eq 1 ]]; then
+            info "Stopping '$vm_name'..."
+            vm_stop
+        else
+            die "VM '$vm_name' is running. Stop it first or use --force-stop"
+        fi
+    fi
+
+    info "Publishing '$vm_name' as image alias '$alias_name'..."
+    local publish_args=("incus" "publish" "$vm_name" "--alias" "$alias_name")
+    if [[ -n "$description" ]]; then
+        publish_args+=("description=${description}")
+    fi
+    "${publish_args[@]}"
+    ok "Published: $alias_name"
+    info "Create VMs from this image: incus init $alias_name <new-name> --vm"
+    info "List images: iwt publish list"
+}
+
+_cmd_publish_list() {
+    local output
+    output=$(incus image list --format table 2>/dev/null | awk 'NR==1 || NR==2 || /windows/' || true)
+    if [[ -z "$output" ]]; then
+        info "No published Windows images found."
+        info "Publish with: iwt publish create"
+    else
+        printf '%s\n' "$output"
+    fi
+}
+
+_cmd_publish_delete() {
+    local alias_name="${1:?Usage: iwt publish delete <alias>}"
+
+    read -r -p "Delete image '$alias_name'? [y/N] " confirm
+    [[ "$confirm" =~ ^[Yy]$ ]] || die "Aborted."
+
+    incus image delete "$alias_name"
+    ok "Deleted image: $alias_name"
 }
 
 # --- Setup rootless ---
@@ -723,6 +837,12 @@ cmd_vm() {
         upgrade)
             cmd_vm_upgrade "$@"
             ;;
+        delete|rm)
+            cmd_vm_delete "$@"
+            ;;
+        assemble)
+            cmd_vm_assemble "$@"
+            ;;
         harden)
             exec "$IWT_ROOT/security/harden-vm.sh" "$@"
             ;;
@@ -752,6 +872,8 @@ Subcommands:
   first-boot [opts]   Run first-boot PowerShell scripts in a VM
   monitor <action>    VM resource monitoring and stats
   upgrade [opts]      Upgrade Windows apps and OS inside a running VM
+  delete [name]       Delete a VM and its storage volumes
+  assemble -f FILE    Create/update VMs from a declarative YAML file
   harden [opts]       Security hardening (Secure Boot, TPM, isolation)
   security-audit      Run Windows security posture audit inside the VM
   secure-boot         Audit UEFI Secure Boot variables inside the VM
@@ -1635,6 +1757,193 @@ EOF
     esac
 }
 
+# ── vm delete ────────────────────────────────────────────────────────────────
+
+cmd_vm_delete() {
+    local vm_name="${IWT_VM_NAME:-windows}"
+    local force=0
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --vm|-n)   vm_name="$2"; shift 2 ;;
+            --force|-f) force=1; shift ;;
+            --help|-h)
+                cat <<EOF
+iwt vm delete — delete a Windows VM and its storage volumes
+
+Usage: iwt vm delete [--vm NAME] [--force]
+
+Options:
+  --vm NAME    VM name (default: \$IWT_VM_NAME or 'windows')
+  --force      Skip confirmation prompt
+
+Examples:
+  iwt vm delete
+  iwt vm delete --vm win11
+  iwt vm delete --vm win11 --force
+EOF
+                return 0 ;;
+            # positional: bare name
+            -*) die "Unknown option: $1. Run: iwt vm delete --help" ;;
+            *)  vm_name="$1"; shift ;;
+        esac
+    done
+
+    source "$IWT_ROOT/remoteapp/backend/incus-backend.sh"
+    IWT_VM_NAME="$vm_name"
+
+    if ! vm_exists; then
+        die "VM '$vm_name' does not exist"
+    fi
+
+    if [[ "$force" -eq 0 ]]; then
+        warn "This will permanently delete VM '$vm_name' and all its storage volumes."
+        read -r -p "Type the VM name to confirm: " confirm
+        [[ "$confirm" == "$vm_name" ]] || die "Aborted."
+    fi
+
+    info "Stopping '$vm_name' (if running)..."
+    incus stop --force "$vm_name" 2>/dev/null || true
+
+    info "Deleting VM instance '$vm_name'..."
+    incus delete "$vm_name" 2>/dev/null || true
+
+    # Remove associated storage volumes (disk image, ISO)
+    local pool="${IWT_STORAGE_POOL:-default}"
+    for vol in "${vm_name}-disk" "${vm_name}-iso" "${vm_name}-drivers"; do
+        if incus storage volume show "$pool" "$vol" &>/dev/null 2>&1; then
+            info "Deleting storage volume '$vol'..."
+            incus storage volume delete "$pool" "$vol"
+        fi
+    done
+
+    ok "VM '$vm_name' deleted."
+}
+
+# ── vm assemble ───────────────────────────────────────────────────────────────
+
+cmd_vm_assemble() {
+    local assemble_file=""
+    local dryrun=false
+    local replace=false
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -f|--file)    assemble_file="$2"; shift 2 ;;
+            -d|--dry-run) dryrun=true;        shift ;;
+            --replace)    replace=true;       shift ;;
+            -h|--help)
+                cat <<EOF
+iwt vm assemble — create or update Windows VMs from a declarative YAML file
+
+Usage: iwt vm assemble -f FILE [--replace] [--dry-run]
+
+Options:
+  -f, --file FILE   YAML file describing VMs (required)
+      --replace     Stop and recreate existing VMs
+  -d, --dry-run     Print commands without executing
+  -h, --help        Show this help
+
+YAML schema:
+  vms:
+    - name: win11              # VM name (required)
+      template: desktop        # Template to use (default: desktop)
+      profile: windows-desktop # Incus profile (overrides template)
+      disk: 64GB               # Disk size (optional)
+
+Example:
+  vms:
+    - name: win11-dev
+      template: desktop
+      disk: 128GB
+    - name: win-server
+      template: server
+      disk: 64GB
+EOF
+                return 0 ;;
+            *) die "Unknown option: $1. Run: iwt vm assemble --help" ;;
+        esac
+    done
+
+    [[ -z "$assemble_file" ]] && die "--file is required"
+    [[ -f "$assemble_file" ]] || die "File not found: $assemble_file"
+
+    source "$IWT_ROOT/remoteapp/backend/incus-backend.sh"
+
+    # Minimal YAML parser — extracts vms[] list fields
+    local parsed
+    parsed="$(awk '
+        /^vms:/ { in_vms=1; next }
+        in_vms && /^[[:space:]]+-[[:space:]]+name:/ {
+            idx++
+            val=$0; sub(/.*name:[[:space:]]*/, "", val)
+            print "V" (idx-1) "_name=" val
+            next
+        }
+        in_vms && idx>0 && /^[[:space:]]+[a-z]+:/ {
+            key=$0; sub(/[[:space:]]*/,"",key); sub(/:.*$/,"",key)
+            val=$0; sub(/.*:[[:space:]]*/,"",val)
+            print "V" (idx-1) "_" key "=" val
+            next
+        }
+        in_vms && /^[^[:space:]]/ && !/^vms:/ { in_vms=0 }
+        END { print "VM_COUNT=" idx }
+    ' "$assemble_file")"
+
+    local vm_count=0
+    while IFS= read -r line; do
+        [[ "$line" =~ ^VM_COUNT=([0-9]+)$ ]] && vm_count="${BASH_REMATCH[1]}"
+    done <<< "$parsed"
+
+    [[ "$vm_count" -eq 0 ]] && die "No VMs found in $assemble_file"
+    info "Found $vm_count VM(s) in $assemble_file"
+
+    local i=0
+    while [[ "$i" -lt "$vm_count" ]]; do
+        local vm_name="" vm_template="" vm_profile="" vm_disk=""
+        while IFS= read -r line; do
+            [[ "$line" =~ ^V${i}_name=(.+)$     ]] && vm_name="${BASH_REMATCH[1]}"
+            [[ "$line" =~ ^V${i}_template=(.+)$ ]] && vm_template="${BASH_REMATCH[1]}"
+            [[ "$line" =~ ^V${i}_profile=(.+)$  ]] && vm_profile="${BASH_REMATCH[1]}"
+            [[ "$line" =~ ^V${i}_disk=(.+)$     ]] && vm_disk="${BASH_REMATCH[1]}"
+        done <<< "$parsed"
+
+        [[ -z "$vm_name" ]] && { warn "VM $i has no name, skipping"; i=$((i+1)); continue; }
+
+        log ""
+        log "── VM: $vm_name ──"
+
+        if [[ "$replace" == true ]] && incus info "$vm_name" &>/dev/null 2>&1; then
+            if [[ "$dryrun" == true ]]; then
+                log "[dry-run] iwt vm delete --vm $vm_name --force"
+            else
+                log "Removing existing VM '$vm_name' (--replace)..."
+                incus stop --force "$vm_name" 2>/dev/null || true
+                incus delete "$vm_name" 2>/dev/null || true
+            fi
+        fi
+
+        local create_args=()
+        [[ -n "$vm_name"     ]] && create_args+=(--name     "$vm_name")
+        [[ -n "$vm_template" ]] && create_args+=(--template "$vm_template")
+        [[ -n "$vm_profile"  ]] && create_args+=(--profile  "$vm_profile")
+        [[ -n "$vm_disk"     ]] && create_args+=(--disk     "$vm_disk")
+
+        if incus info "$vm_name" &>/dev/null 2>&1; then
+            log "VM '$vm_name' already exists — skipping (use --replace to recreate)."
+        elif [[ "$dryrun" == true ]]; then
+            log "[dry-run] iwt vm create ${create_args[*]}"
+        else
+            cmd_vm_create "${create_args[@]}" || warn "Failed to create VM '$vm_name'"
+        fi
+
+        i=$((i+1))
+    done
+
+    log ""
+    ok "Assembly complete."
+}
+
 # ── vm upgrade ───────────────────────────────────────────────────────────────
 
 cmd_vm_upgrade() {
@@ -1702,9 +2011,11 @@ EOF
         local snap_name
         snap_name="pre-upgrade-$(date +%Y%m%d-%H%M%S)"
         info "Creating pre-upgrade snapshot: $snap_name"
-        incus snapshot create "$vm_name" "$snap_name" \
-            && ok "Snapshot created: $snap_name" \
-            || warn "Snapshot failed — continuing without it"
+        if incus snapshot create "$vm_name" "$snap_name"; then
+            ok "Snapshot created: $snap_name"
+        else
+            warn "Snapshot failed — continuing without it"
+        fi
     fi
 
     # Upgrade all apps via winget
@@ -2682,6 +2993,7 @@ main() {
         tui)        exec "$IWT_ROOT/tui/iwt-tui.sh" "$@" ;;
         dashboard)  exec "$IWT_ROOT/cli/web-dashboard.sh" "$@" ;;
         update)     exec "$IWT_ROOT/cli/update.sh" "$@" ;;
+        publish)    cmd_publish "$@" ;;
         setup-rootless) cmd_setup_rootless "$@" ;;
         doctor)     cmd_doctor "$@" ;;
         config)     cmd_config "$@" ;;
