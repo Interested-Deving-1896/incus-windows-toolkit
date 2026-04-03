@@ -2781,8 +2781,11 @@ EOF
         config)
             mkdir -p "${_dir}"
             [[ -f "${_cfg}" ]] || { _demo_write_config; ok "Config written: ${_cfg}"; }
-            [[ "${1:-}" == "--edit" || "${1:-}" == "-e" ]] \
-                && "${EDITOR:-vi}" "${_cfg}" || cat "${_cfg}"
+            if [[ "${1:-}" == "--edit" || "${1:-}" == "-e" ]]; then
+                "${EDITOR:-vi}" "${_cfg}"
+            else
+                cat "${_cfg}"
+            fi
             ;;
         start)
             [[ -f "${_bin}" ]] || die "Not installed. Run: iwt demo install"
@@ -2791,9 +2794,11 @@ EOF
             mkdir -p "${_dir}"
             ( cd "${_dir}" && "${_bin}" >> "${_log}" 2>&1 & echo $! > "${_pid}" )
             sleep 1
-            _demo_running \
-                && ok "Demo server started (PID $(cat "${_pid}")) — ${_url}" \
-                || die "Failed to start. Check: iwt demo logs"
+            if _demo_running; then
+                ok "Demo server started (PID $(cat "${_pid}")) — ${_url}"
+            else
+                die "Failed to start. Check: iwt demo logs"
+            fi
             ;;
         stop)
             _demo_running || { info "Not running"; return 0; }
@@ -2802,14 +2807,19 @@ EOF
             ;;
         restart) cmd_demo stop; sleep 1; cmd_demo start ;;
         status)
-            _demo_running \
-                && ok "Running (PID $(cat "${_pid}")) — ${_url}" \
-                || info "Stopped"
+            if _demo_running; then
+                ok "Running (PID $(cat "${_pid}")) — ${_url}"
+            else
+                info "Stopped"
+            fi
             ;;
         logs)
             [[ -f "${_log}" ]] || die "No log file: ${_log}"
-            [[ "${1:-}" == "--follow" || "${1:-}" == "-f" ]] \
-                && tail -f "${_log}" || cat "${_log}"
+            if [[ "${1:-}" == "--follow" || "${1:-}" == "-f" ]]; then
+                tail -f "${_log}"
+            else
+                cat "${_log}"
+            fi
             ;;
         url)  printf '%s\n' "${_url}" ;;
         test)
