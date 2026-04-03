@@ -44,6 +44,8 @@ Commands:
   guest       Guest tool management (SvcGuest, serviceman, SrvLib)
   apps        Windows app store (install app bundles via winget)
   cloud       Sync backups to cloud storage (S3, B2, rclone)
+  demo        Manage a local incus-demo-server instance
+  winesapos   Fetch, import, and launch winesapOS gaming VMs
   fleet       Multi-VM orchestration (start-all, stop-all, backup-all)
   profiles    Install and manage Incus VM profiles
   remoteapp   Launch Windows apps as seamless Linux windows
@@ -2127,6 +2129,267 @@ COMP
     esac
 }
 
+# --- demo ---
+
+cmd_demo() {
+    # Manage a local incus-demo-server instance.
+    # https://github.com/lxc/incus-demo-server
+    local subcmd="${1:-help}"; shift || true
+
+    local _dir="${IWT_DEMO_DIR:-${HOME}/.local/share/iwt/demo-server}"
+    local _bin="${_dir}/incus-demo-server"
+    local _cfg="${_dir}/config.yaml"
+    local _pid="${_dir}/demo-server.pid"
+    local _log="${_dir}/demo-server.log"
+    local _addr="${IWT_DEMO_ADDR:-[::]:8080}"
+    local _port; _port="$(printf '%s' "${_addr}" | sed 's/.*://')"
+    local _url="http://localhost:${_port}"
+    local _image="${IWT_DEMO_IMAGE:-ubuntu/24.04}"
+    local _expiry="${IWT_DEMO_EXPIRY:-3600}"
+    local _total="${IWT_DEMO_TOTAL:-10}"
+    local _ip="${IWT_DEMO_IP_LIMIT:-2}"
+    local _cpu="${IWT_DEMO_CPU:-1}"
+    local _mem="${IWT_DEMO_MEMORY:-512MiB}"
+    local _disk="${IWT_DEMO_DISK:-5GiB}"
+    local _pre="${IWT_DEMO_PREALLOCATE:-2}"
+    local _mod="github.com/lxc/incus-demo-server/cmd/incus-demo-server@latest"
+
+    _demo_running() { [[ -f "${_pid}" ]] && kill -0 "$(cat "${_pid}")" 2>/dev/null; }
+
+    _demo_write_config() {
+        mkdir -p "${_dir}"
+        cat > "${_cfg}" <<EOF
+server:
+  api:
+    address: "${_addr}"
+  limits:
+    total: ${_total}
+    ip: ${_ip}
+  terms: |
+    This is a local iwt demo server.
+    Instances expire after ${_expiry} seconds.
+incus:
+  instance:
+    allocate:
+      count: ${_pre}
+    expiry: ${_expiry}
+    source:
+      image: "${_image}"
+      type: "container"
+    profiles:
+      - default
+    limits:
+      cpu: ${_cpu}
+      disk: ${_disk}
+      memory: ${_mem}
+  session:
+    command: ["bash"]
+    expiry: ${_expiry}
+    console_only: true
+EOF
+    }
+
+    case "${subcmd}" in
+        install)
+            command -v go &>/dev/null || die "go is required. See https://go.dev/dl/"
+            mkdir -p "${_dir}"
+            info "Installing incus-demo-server..."
+            GOBIN="${_dir}" go install "${_mod}"
+            ok "Installed: ${_bin}"
+            ;;
+        config)
+            mkdir -p "${_dir}"
+            [[ -f "${_cfg}" ]] || { _demo_write_config; ok "Config written: ${_cfg}"; }
+            [[ "${1:-}" == "--edit" || "${1:-}" == "-e" ]] \
+                && "${EDITOR:-vi}" "${_cfg}" || cat "${_cfg}"
+            ;;
+        start)
+            [[ -f "${_bin}" ]] || die "Not installed. Run: iwt demo install"
+            [[ -f "${_cfg}" ]] || { _demo_write_config; info "Generated config: ${_cfg}"; }
+            _demo_running && { info "Already running (PID $(cat "${_pid}"))"; return 0; }
+            mkdir -p "${_dir}"
+            ( cd "${_dir}" && "${_bin}" >> "${_log}" 2>&1 & echo $! > "${_pid}" )
+            sleep 1
+            _demo_running \
+                && ok "Demo server started (PID $(cat "${_pid}")) — ${_url}" \
+                || die "Failed to start. Check: iwt demo logs"
+            ;;
+        stop)
+            _demo_running || { info "Not running"; return 0; }
+            kill "$(cat "${_pid}")"; rm -f "${_pid}"
+            ok "Demo server stopped"
+            ;;
+        restart) cmd_demo stop; sleep 1; cmd_demo start ;;
+        status)
+            _demo_running \
+                && ok "Running (PID $(cat "${_pid}")) — ${_url}" \
+                || info "Stopped"
+            ;;
+        logs)
+            [[ -f "${_log}" ]] || die "No log file: ${_log}"
+            [[ "${1:-}" == "--follow" || "${1:-}" == "-f" ]] \
+                && tail -f "${_log}" || cat "${_log}"
+            ;;
+        url)  printf '%s\n' "${_url}" ;;
+        test)
+            command -v curl &>/dev/null || die "curl is required"
+            curl --silent --fail --max-time 5 "${_url}/1.0" >/dev/null \
+                || die "Server not responding at ${_url}/1.0 — run: iwt demo start"
+            ok "${_url}/1.0 — OK"
+            curl --silent --fail --max-time 5 "${_url}/1.0/terms" >/dev/null \
+                && ok "${_url}/1.0/terms — OK"
+            ;;
+        help|--help|-h)
+            cat <<'EOF'
+iwt demo — manage a local incus-demo-server instance
+  https://github.com/lxc/incus-demo-server
+
+Usage: iwt demo <subcommand> [options]
+
+Subcommands:
+  install          Install the demo server binary (requires Go)
+  config [--edit]  Show or edit the generated config.yaml
+  start            Start the demo server in the background
+  stop             Stop the running demo server
+  restart          Stop then start
+  status           Show whether the server is running
+  logs [--follow]  Show server logs
+  url              Print the API base URL
+  test             Smoke-test the running server via curl
+
+Environment overrides:
+  IWT_DEMO_DIR, IWT_DEMO_ADDR, IWT_DEMO_EXPIRY, IWT_DEMO_TOTAL,
+  IWT_DEMO_IP_LIMIT, IWT_DEMO_IMAGE, IWT_DEMO_CPU, IWT_DEMO_MEMORY,
+  IWT_DEMO_DISK, IWT_DEMO_PREALLOCATE
+EOF
+            ;;
+        *) err "Unknown demo subcommand: ${subcmd}"; cmd_demo help; exit 1 ;;
+    esac
+}
+
+# --- winesapos ---
+
+cmd_winesapos() {
+    # Fetch, import, and launch winesapOS gaming VMs.
+    # https://github.com/winesapOS/winesapOS
+    local subcmd="${1:-help}"; shift || true
+
+    local _version="${IWT_WINESAPOS_VERSION:-4.5.0}"
+    local _edition="${IWT_WINESAPOS_EDITION:-minimal}"
+    local _dir="${IWT_WINESAPOS_DIR:-${HOME}/.local/share/iwt/winesapos}"
+    local _cpus="${IWT_WINESAPOS_CPUS:-4}"
+    local _mem="${IWT_WINESAPOS_MEMORY:-8192}"
+    local _disk="${IWT_WINESAPOS_DISK:-64GiB}"
+    local _base="https://github.com/winesapOS/winesapOS/releases/download"
+
+    _ws_fname()      { printf 'winesapos-%s-%s.img.zst' "$1" "$2"; }
+    _ws_alias()      { printf 'winesapos/%s/%s' "$1" "$2"; }
+    _ws_img_exists() { incus image list --format csv 2>/dev/null | grep -q "^$(_ws_alias "$1" "$2"),"; }
+
+    case "${subcmd}" in
+        fetch)
+            local version="${_version}" edition="${_edition}"
+            while [[ "$#" -gt 0 ]]; do
+                case "$1" in
+                    --edition|-e) edition="$2"; shift 2 ;;
+                    --version|-v) version="$2"; shift 2 ;;
+                    *) version="$1"; shift ;;
+                esac
+            done
+            command -v curl &>/dev/null || die "curl is required"
+            command -v zstd &>/dev/null || die "zstd is required: apt install zstd"
+            local fname dest
+            fname="$(_ws_fname "${version}" "${edition}")"
+            dest="${_dir}/${fname}"
+            mkdir -p "${_dir}"
+            [[ -f "${dest%.zst}" ]] && { info "Already fetched: ${dest%.zst}"; return 0; }
+            [[ -f "${dest}" ]] || { info "Downloading ${fname}..."; curl -L --progress-bar --fail -o "${dest}" "${_base}/${version}/${fname}"; }
+            info "Decompressing..."
+            zstd --decompress --rm "${dest}" -o "${dest%.zst}"
+            ok "Image ready: ${dest%.zst}"
+            ;;
+        import)
+            local version="${_version}" edition="${_edition}"
+            while [[ "$#" -gt 0 ]]; do
+                case "$1" in
+                    --edition|-e) edition="$2"; shift 2 ;;
+                    --version|-v) version="$2"; shift 2 ;;
+                    *) version="$1"; shift ;;
+                esac
+            done
+            command -v qemu-img &>/dev/null || die "qemu-img is required: apt install qemu-utils"
+            local img alias qcow2
+            img="${_dir}/$(_ws_fname "${version}" "${edition}" | sed 's/\.zst$//')"
+            alias="$(_ws_alias "${version}" "${edition}")"
+            qcow2="${img%.img}.qcow2"
+            [[ -f "${img}" ]] || die "Image not found: ${img}. Run: iwt winesapos fetch ${version} --edition ${edition}"
+            _ws_img_exists "${version}" "${edition}" && { info "Already imported: ${alias}"; return 0; }
+            [[ -f "${qcow2}" ]] || { info "Converting to qcow2..."; qemu-img convert -f raw -O qcow2 -p "${img}" "${qcow2}"; }
+            incus image import "${qcow2}" --alias "${alias}" --type virtual-machine
+            ok "Imported: ${alias}"
+            ;;
+        launch)
+            [[ "$#" -ge 1 ]] || die "Usage: iwt winesapos launch NAME [options]"
+            local name="$1"; shift
+            local version="${_version}" edition="${_edition}"
+            local cpus="${_cpus}" memory="${_mem}" disk="${_disk}"
+            while [[ "$#" -gt 0 ]]; do
+                case "$1" in
+                    --version|-v) version="$2"; shift 2 ;;
+                    --edition|-e) edition="$2"; shift 2 ;;
+                    --cpus|-c)    cpus="$2";    shift 2 ;;
+                    --memory|-m)  memory="$2";  shift 2 ;;
+                    --disk|-d)    disk="$2";    shift 2 ;;
+                    *) die "Unknown option: $1" ;;
+                esac
+            done
+            local alias; alias="$(_ws_alias "${version}" "${edition}")"
+            if ! _ws_img_exists "${version}" "${edition}"; then
+                info "Image '${alias}' not found — fetching and importing..."
+                cmd_winesapos fetch "${version}" --edition "${edition}"
+                cmd_winesapos import "${version}" --edition "${edition}"
+            fi
+            info "Launching winesapOS VM: ${name} (${alias}, ${cpus} CPUs, ${memory} MiB, ${disk})"
+            incus launch "${alias}" "${name}" --vm \
+                --config limits.cpu="${cpus}" \
+                --config limits.memory="${memory}MiB" \
+                --device root,size="${disk}"
+            ok "VM launched: ${name}"
+            ;;
+        list)
+            incus list --format table | grep -i "winesapos" \
+                || info "No winesapOS VMs found. Launch with: iwt winesapos launch NAME"
+            ;;
+        versions)
+            command -v curl &>/dev/null || die "curl is required"
+            info "winesapOS releases:"
+            curl --silent --fail \
+                "https://api.github.com/repos/winesapOS/winesapOS/releases?per_page=10" \
+                | grep '"tag_name"' | sed 's/.*"tag_name": "\(.*\)".*/  \1/'
+            ;;
+        help|--help|-h)
+            cat <<'EOF'
+iwt winesapos — fetch, import, and launch winesapOS gaming VMs
+  https://github.com/winesapOS/winesapOS
+
+Usage: iwt winesapos <subcommand> [options]
+
+Subcommands:
+  fetch   [VERSION] [--edition minimal|performance|secure]
+  import  [VERSION] [--edition ...]
+  launch  NAME [--version V] [--edition E] [--cpus N] [--memory MiB] [--disk SIZE]
+  list    List winesapOS VMs
+  versions  List available releases
+
+Environment overrides:
+  IWT_WINESAPOS_VERSION, IWT_WINESAPOS_EDITION, IWT_WINESAPOS_DIR,
+  IWT_WINESAPOS_CPUS, IWT_WINESAPOS_MEMORY, IWT_WINESAPOS_DISK
+EOF
+            ;;
+        *) err "Unknown winesapos subcommand: ${subcmd}"; cmd_winesapos help; exit 1 ;;
+    esac
+}
+
 # --- Main dispatch ---
 
 main() {
@@ -2141,6 +2404,8 @@ main() {
         guest)      cmd_guest "$@" ;;
         apps)       exec "$IWT_ROOT/guest/app-store.sh" "$@" ;;
         cloud)      exec "$IWT_ROOT/cli/cloud-sync.sh" "$@" ;;
+        demo)       cmd_demo       "$@" ;;
+        winesapos)  cmd_winesapos  "$@" ;;
         fleet)      exec "$IWT_ROOT/cli/fleet.sh" "$@" ;;
         profiles)   cmd_profiles "$@" ;;
         remoteapp)  cmd_remoteapp "$@" ;;
