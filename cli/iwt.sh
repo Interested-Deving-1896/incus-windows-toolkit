@@ -53,6 +53,7 @@ Commands:
   dashboard   Launch web monitoring dashboard
   publish         Create and manage Incus images from a Windows VM
   setup-rootless  Configure the system for rootless VM operation via incus-user
+  host-exec       Run a host command from inside the Windows VM via nsenter
   update          Check for updates and self-update
   doctor          Check system prerequisites
   config          Manage IWT configuration
@@ -796,6 +797,9 @@ cmd_vm() {
         snapshot)
             cmd_vm_snapshot "$@"
             ;;
+        snapshot-auto)
+            cmd_vm_snapshot auto "$@"
+            ;;
         share)
             cmd_vm_share "$@"
             ;;
@@ -877,8 +881,9 @@ Subcommands:
   harden [opts]       Security hardening (Secure Boot, TPM, isolation)
   security-audit      Run Windows security posture audit inside the VM
   secure-boot         Audit UEFI Secure Boot variables inside the VM
-  snapshot <action>   Manage VM snapshots
-  share <action>      Manage shared folders
+  snapshot <action>       Manage VM snapshots
+  snapshot-auto <action>  Manage automatic snapshot schedules (alias: vm snapshot auto)
+  share <action>          Manage shared folders
   gpu <action>        Manage GPU passthrough
   usb <action>        Manage USB device passthrough
   net <action>        Manage networking and port forwarding
@@ -2654,6 +2659,32 @@ EOF
     esac
 }
 
+# ── host-exec ─────────────────────────────────────────────────────────────────
+
+cmd_host_exec() {
+    [[ $# -gt 0 ]] || die "Usage: iwt host-exec [--vm NAME] COMMAND [ARGS...]"
+
+    local vm_name="${IWT_VM_NAME:-windows}"
+    if [[ "${1:-}" == "--vm" ]]; then
+        vm_name="$2"; shift 2
+    fi
+
+    require_incus
+
+    # Run the command on the host via nsenter from inside the VM.
+    # Falls back to chroot /run/host for unprivileged VMs.
+    local cmd_str
+    cmd_str="$(printf '%q ' "$@")"
+    incus exec "${vm_name}" -- sh -c \
+        "if [ -r /proc/1/ns/mnt ]; then
+             exec nsenter --mount=/proc/1/ns/mnt --uts=/proc/1/ns/uts \
+                          --ipc=/proc/1/ns/ipc --net=/proc/1/ns/net \
+                          --pid=/proc/1/ns/pid --target=1 -- ${cmd_str}
+         else
+             exec chroot /run/host ${cmd_str}
+         fi"
+}
+
 # --- Tab completion ---
 
 cmd_completion() {
@@ -2676,7 +2707,7 @@ _iwt_completions() {
             COMPREPLY=($(compgen -W "download build drivers pack unpack list help" -- "$cur"))
             ;;
         vm)
-            COMPREPLY=($(compgen -W "create start stop status list rdp snapshot share gpu usb net setup-guest storage template backup export import first-boot monitor harden security-audit secure-boot help" -- "$cur"))
+            COMPREPLY=($(compgen -W "create start stop status list rdp snapshot snapshot-auto share gpu usb net setup-guest storage template backup export import first-boot monitor harden security-audit secure-boot help" -- "$cur"))
             ;;
         profiles)
             COMPREPLY=($(compgen -W "install list show diff help" -- "$cur"))
@@ -2711,7 +2742,7 @@ _iwt() {
         args)
             case $words[1] in
                 image)     _values 'subcommand' download build drivers pack unpack list help ;;
-                vm)        _values 'subcommand' create start stop status list rdp snapshot share gpu usb net setup-guest storage template backup export import first-boot monitor harden security-audit secure-boot help ;;
+                vm)        _values 'subcommand' create start stop status list rdp snapshot snapshot-auto share gpu usb net setup-guest storage template backup export import first-boot monitor harden security-audit secure-boot help ;;
                 profiles)  _values 'subcommand' install list show diff help ;;
                 remoteapp) _values 'subcommand' launch install discover config help ;;
                 config)    _values 'subcommand' init show edit path help ;;
@@ -3024,6 +3055,7 @@ main() {
         update)     exec "$IWT_ROOT/cli/update.sh" "$@" ;;
         publish)    cmd_publish "$@" ;;
         setup-rootless) cmd_setup_rootless "$@" ;;
+        host-exec)  cmd_host_exec  "$@" ;;
         doctor)     cmd_doctor "$@" ;;
         config)     cmd_config "$@" ;;
         completion) cmd_completion "$@" ;;
