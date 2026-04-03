@@ -51,13 +51,186 @@ Commands:
   remoteapp   Launch Windows apps as seamless Linux windows
   tui         Launch interactive terminal UI
   dashboard   Launch web monitoring dashboard
-  update      Check for updates and self-update
-  doctor      Check system prerequisites
-  config      Manage IWT configuration
+  setup-rootless  Configure the system for rootless VM operation via incus-user
+  update          Check for updates and self-update
+  doctor          Check system prerequisites
+  config          Manage IWT configuration
   version     Show version
 
 Run 'iwt <command> --help' for details on each command.
 EOF
+}
+
+# --- Setup rootless ---
+
+cmd_setup_rootless() {
+    # Guided setup for running Windows VMs as a non-root user via incus-user.
+    #
+    # Checks and optionally fixes:
+    #   1. Not running as root
+    #   2. incus-user daemon (systemd user service + socket)
+    #   3. KVM device access (/dev/kvm, kvm group)
+    #   4. subuid/subgid delegation
+    #   5. windows-desktop Incus profile registered in incus-user
+    #
+    # Usage: iwt setup-rootless [--fix] [--yes] [--help]
+
+    local fix=0
+    local issues=0
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --fix)       fix=1;  shift ;;
+            -Y|--yes)    fix=1;  shift ;;
+            --help|-h)
+                cat <<EOF
+iwt setup-rootless — configure the system for rootless Windows VM operation
+
+Checks and configures:
+  1. User is not root
+  2. incus-user daemon (systemd user service)
+  3. KVM device access (/dev/kvm, kvm group membership)
+  4. UID/GID delegation (subuid/subgid)
+  5. windows-desktop Incus profile registered in incus-user
+
+Usage: iwt setup-rootless [--fix] [--yes]
+
+Options:
+  --fix    Attempt to automatically fix detected issues
+  --yes    Non-interactive (implies --fix)
+EOF
+                return 0 ;;
+            *) die "Unknown option: $1. Run: iwt setup-rootless --help" ;;
+        esac
+    done
+
+    _sr_ok()      { printf '  \033[32m✔\033[0m  %s\n' "$*"; }
+    _sr_warn()    { printf '  \033[33m⚠\033[0m  %s\n' "$*"; }
+    _sr_fail()    { printf '  \033[31m✘\033[0m  %s\n' "$*"; issues=$((issues+1)); }
+    _sr_section() { printf '\n\033[1m%s\033[0m\n' "$*"; }
+
+    _sr_ask_fix() {
+        local msg="$1" cmd="$2"
+        if [[ "$fix" -eq 1 ]]; then
+            info "  Fixing: $msg"
+            if eval "$cmd"; then
+                _sr_ok "Fixed: $msg"
+            else
+                _sr_fail "Failed to fix: $msg"
+            fi
+        else
+            _sr_warn "$msg"
+            info "    Run: $cmd"
+            issues=$((issues+1))
+        fi
+    }
+
+    # 1. Not root
+    _sr_section "1. User check"
+    if [[ "$(id -ru)" -eq 0 ]]; then
+        die "Run as a regular user, not root."
+    fi
+    _sr_ok "Running as ${USER} (uid=$(id -ru))"
+
+    # 2. incus-user daemon
+    _sr_section "2. incus-user daemon"
+    local incus_user_socket="${XDG_RUNTIME_DIR:-/run/user/$(id -ru)}/incus/incus.socket"
+
+    if ! command -v incus &>/dev/null; then
+        _sr_fail "incus not found — install Incus: https://linuxcontainers.org/incus/"
+    else
+        _sr_ok "incus found: $(incus --version 2>/dev/null || true)"
+    fi
+
+    if [[ -S "${incus_user_socket}" ]]; then
+        _sr_ok "incus-user socket: ${incus_user_socket}"
+    else
+        if systemctl --user list-unit-files incus-user.service &>/dev/null 2>&1; then
+            if systemctl --user is-active incus-user.service &>/dev/null 2>&1; then
+                _sr_warn "incus-user.service active but socket not found"
+                info "    Check: systemctl --user status incus-user.service"
+                issues=$((issues+1))
+            else
+                _sr_ask_fix \
+                    "Start and enable incus-user.service" \
+                    "systemctl --user enable --now incus-user.service"
+            fi
+        else
+            _sr_fail "incus-user.service not found — install incus-user package"
+        fi
+    fi
+
+    # 3. KVM access
+    _sr_section "3. KVM device access"
+    if [[ -c /dev/kvm ]]; then
+        local kvm_group
+        kvm_group="$(stat -c '%G' /dev/kvm 2>/dev/null || echo kvm)"
+        if id -nG "${USER}" | grep -qw "${kvm_group}"; then
+            _sr_ok "/dev/kvm accessible (member of group ${kvm_group})"
+        else
+            _sr_ask_fix \
+                "Add ${USER} to ${kvm_group} group for /dev/kvm access" \
+                "sudo usermod -aG ${kvm_group} ${USER}"
+            _sr_warn "Log out and back in (or run: newgrp ${kvm_group}) for group change to take effect"
+        fi
+    else
+        _sr_fail "/dev/kvm not found — KVM not available on this host"
+        info "    Check: lsmod | grep kvm && ls -la /dev/kvm"
+    fi
+
+    # 4. subuid/subgid
+    _sr_section "4. UID/GID delegation (subuid/subgid)"
+    for pair in "subuid:subuid" "subgid:subgid"; do
+        local file="/etc/${pair%%:*}" label="${pair##*:}"
+        if grep -q "^${USER}:" "${file}" 2>/dev/null; then
+            local range
+            range="$(grep "^${USER}:" "${file}" | head -1)"
+            _sr_ok "${label}: ${range}"
+        else
+            _sr_ask_fix \
+                "Add ${USER} to ${file}" \
+                "sudo usermod --add-sub${label}s 65536-131071 ${USER}"
+        fi
+    done
+
+    # 5. windows-desktop profile in incus-user
+    _sr_section "5. windows-desktop Incus profile"
+    local incus_cmd="incus"
+    [[ -S "${incus_user_socket}" ]] && export INCUS_SOCKET="${incus_user_socket}"
+
+    local arch
+    arch=$(detect_arch 2>/dev/null || uname -m | sed 's/aarch64/arm64/;s/x86_64/x86_64/')
+    local profile_yaml="${IWT_ROOT}/profiles/${arch}/windows-desktop.yaml"
+
+    if ${incus_cmd} profile show windows-desktop &>/dev/null 2>&1; then
+        _sr_ok "windows-desktop profile registered"
+    else
+        if [[ -f "${profile_yaml}" ]]; then
+            _sr_ask_fix \
+                "Register windows-desktop profile" \
+                "${incus_cmd} profile create windows-desktop && ${incus_cmd} profile edit windows-desktop < ${profile_yaml}"
+        else
+            _sr_warn "windows-desktop profile not registered and YAML not found at ${profile_yaml}"
+            info "    Run: iwt profiles install"
+            issues=$((issues+1))
+        fi
+    fi
+
+    # Summary
+    printf '\n'
+    if [[ "${issues}" -eq 0 ]]; then
+        printf '\033[32mAll checks passed. Rootless iwt is ready.\033[0m\n\n'
+        printf 'Quick start:\n'
+        printf '  iwt vm create --name windows --template desktop\n'
+    else
+        printf '\033[33m%d issue(s) found.\033[0m\n' "${issues}"
+        if [[ "${fix}" -eq 0 ]]; then
+            printf 'Re-run with --fix to attempt automatic fixes:\n'
+            printf '  iwt setup-rootless --fix\n'
+        else
+            printf 'Some issues could not be fixed automatically.\n'
+        fi
+    fi
 }
 
 # --- Doctor (prerequisite check) ---
@@ -547,6 +720,9 @@ cmd_vm() {
         monitor)
             exec "$IWT_ROOT/cli/monitor.sh" "$@"
             ;;
+        upgrade)
+            cmd_vm_upgrade "$@"
+            ;;
         harden)
             exec "$IWT_ROOT/security/harden-vm.sh" "$@"
             ;;
@@ -575,6 +751,7 @@ Subcommands:
   import <path>       Import VM from backup or image
   first-boot [opts]   Run first-boot PowerShell scripts in a VM
   monitor <action>    VM resource monitoring and stats
+  upgrade [opts]      Upgrade Windows apps and OS inside a running VM
   harden [opts]       Security hardening (Secure Boot, TPM, isolation)
   security-audit      Run Windows security posture audit inside the VM
   secure-boot         Audit UEFI Secure Boot variables inside the VM
@@ -1456,6 +1633,99 @@ EOF
             exit 1
             ;;
     esac
+}
+
+# ── vm upgrade ───────────────────────────────────────────────────────────────
+
+cmd_vm_upgrade() {
+    # Upgrade Windows apps and OS inside a running VM via winget.
+    #
+    # Usage: iwt vm upgrade [--vm NAME] [--list] [--os] [--no-snapshot]
+    #
+    # Options:
+    #   --vm NAME        Incus VM name (default: $IWT_VM_NAME)
+    #   --list           List available upgrades without installing
+    #   --os             Also run Windows Update (requires PSWindowsUpdate module)
+    #   --no-snapshot    Skip the pre-upgrade snapshot
+    #   --help           Show this help
+
+    local vm_name="${IWT_VM_NAME:-windows}" list_only=0 do_os=0 no_snapshot=0
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --vm)          vm_name="$2"; shift 2 ;;
+            --list)        list_only=1;  shift ;;
+            --os)          do_os=1;      shift ;;
+            --no-snapshot) no_snapshot=1; shift ;;
+            --help|-h)
+                cat <<EOF
+iwt vm upgrade — upgrade Windows apps and OS inside a running VM
+
+Usage: iwt vm upgrade [options]
+
+Options:
+  --vm NAME        Incus VM name (default: \$IWT_VM_NAME or 'windows')
+  --list           List available upgrades without installing
+  --os             Also run Windows Update via PSWindowsUpdate
+  --no-snapshot    Skip the pre-upgrade snapshot (not recommended)
+
+Examples:
+  iwt vm upgrade
+  iwt vm upgrade --vm win11 --list
+  iwt vm upgrade --vm win11 --os
+EOF
+                return 0 ;;
+            *) die "Unknown option: $1. Run: iwt vm upgrade --help" ;;
+        esac
+    done
+
+    source "$IWT_ROOT/remoteapp/backend/incus-backend.sh"
+    IWT_VM_NAME="$vm_name"
+
+    if ! vm_exists; then
+        die "VM '$vm_name' does not exist"
+    fi
+    if ! vm_is_running; then
+        die "VM '$vm_name' is not running. Start it first: iwt vm start $vm_name"
+    fi
+
+    if [[ "$list_only" -eq 1 ]]; then
+        info "Checking for available upgrades in '$vm_name'..."
+        incus exec "$vm_name" -- powershell.exe -NonInteractive -Command \
+            'winget upgrade 2>&1' \
+            || die "winget upgrade list failed (is Windows booted?)"
+        return 0
+    fi
+
+    # Pre-upgrade snapshot
+    if [[ "$no_snapshot" -eq 0 ]]; then
+        local snap_name
+        snap_name="pre-upgrade-$(date +%Y%m%d-%H%M%S)"
+        info "Creating pre-upgrade snapshot: $snap_name"
+        incus snapshot create "$vm_name" "$snap_name" \
+            && ok "Snapshot created: $snap_name" \
+            || warn "Snapshot failed — continuing without it"
+    fi
+
+    # Upgrade all apps via winget
+    info "Upgrading all apps in '$vm_name' via winget..."
+    incus exec "$vm_name" -- powershell.exe -NonInteractive -Command \
+        'winget upgrade --all --accept-source-agreements --accept-package-agreements 2>&1' \
+        || die "winget upgrade --all failed"
+    ok "App upgrades complete in '$vm_name'"
+
+    # Optional: Windows Update via PSWindowsUpdate
+    if [[ "$do_os" -eq 1 ]]; then
+        info "Running Windows Update in '$vm_name' (requires PSWindowsUpdate module)..."
+        incus exec "$vm_name" -- powershell.exe -NonInteractive -Command \
+            'if (-not (Get-Module -ListAvailable PSWindowsUpdate)) {
+                Install-Module PSWindowsUpdate -Force -Scope CurrentUser
+            }
+            Import-Module PSWindowsUpdate
+            Get-WindowsUpdate -Install -AcceptAll -AutoReboot 2>&1' \
+            || warn "Windows Update failed or requires a reboot to complete"
+        ok "Windows Update initiated in '$vm_name'"
+    fi
 }
 
 cmd_vm_net() {
@@ -2412,6 +2682,7 @@ main() {
         tui)        exec "$IWT_ROOT/tui/iwt-tui.sh" "$@" ;;
         dashboard)  exec "$IWT_ROOT/cli/web-dashboard.sh" "$@" ;;
         update)     exec "$IWT_ROOT/cli/update.sh" "$@" ;;
+        setup-rootless) cmd_setup_rootless "$@" ;;
         doctor)     cmd_doctor "$@" ;;
         config)     cmd_config "$@" ;;
         completion) cmd_completion "$@" ;;
