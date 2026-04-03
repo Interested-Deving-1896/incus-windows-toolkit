@@ -1516,7 +1516,7 @@ cmd_vm_snapshot() {
             [[ -n "$snap_name" ]] || die "Usage: iwt vm snapshot restore <name> [--stateful] [--vm NAME]"
             snapshot_restore "$snap_name" "$stateful"
             ;;
-        delete|rm)
+        delete|rm|remove)
             local snap_name=""
             local vm_name=""
 
@@ -2052,6 +2052,12 @@ cmd_vm_net() {
         forward|fwd)
             cmd_vm_net_forward "$@"
             ;;
+        unforward|unfwd)
+            cmd_vm_net_forward remove "$@"
+            ;;
+        list|ls)
+            cmd_vm_net_forward list "$@"
+            ;;
         nic)
             cmd_vm_net_nic "$@"
             ;;
@@ -2068,6 +2074,8 @@ iwt vm net - Manage networking and port forwarding
 
 Subcommands:
   forward <action>    Manage port forwards
+  unforward <name>    Remove a port forward (alias: forward remove)
+  list                List port forwards (alias: forward list)
   nic <action>        Manage network interfaces
   status              Show networking status (IP, NICs, forwards)
 
@@ -2094,11 +2102,13 @@ NIC options:
 
 Examples:
   iwt vm net status
+  iwt vm net list
   iwt vm net forward add 8080
   iwt vm net forward add 3000 --to 3000 --name webapp
   iwt vm net forward add 53 --proto udp --name dns
   iwt vm net forward list
   iwt vm net forward remove webapp
+  iwt vm net unforward webapp
   iwt vm net nic add eth1 --network incusbr1
   iwt vm net nic remove eth1
 EOF
@@ -2237,7 +2247,7 @@ cmd_vm_usb() {
     shift || true
 
     case "$subcmd" in
-        attach)
+        attach|add)
             local vendor_id=""
             local product_id=""
             local device_name=""
@@ -2277,7 +2287,7 @@ cmd_vm_usb() {
 
             usb_attach "$vendor_id" "$product_id" "$device_name" "$required"
             ;;
-        detach)
+        detach|remove)
             local device_name=""
             local vm_name=""
 
@@ -2306,7 +2316,7 @@ cmd_vm_usb() {
             printf "  %-20s %-10s %s\n" "----" "--" "----"
             usb_list_vm
             ;;
-        list-host)
+        list-host|host)
             bold "USB devices on host:"
             usb_list_host
             ;;
@@ -2351,7 +2361,7 @@ cmd_vm_gpu() {
     shift || true
 
     case "$subcmd" in
-        attach)
+        attach|add)
             local gpu_type="physical"
             local pci_addr=""
             local vendor_id=""
@@ -2374,7 +2384,7 @@ cmd_vm_gpu() {
             [[ -n "$vm_name" ]] && IWT_VM_NAME="$vm_name"
             gpu_attach "$gpu_type" "$pci_addr" "$vendor_id" "$product_id" "$mdev_profile"
             ;;
-        detach)
+        detach|remove)
             local vm_name=""
             [[ "${1:-}" == "--vm" ]] && { vm_name="$2"; shift 2; }
             [[ -n "$vm_name" ]] && IWT_VM_NAME="$vm_name"
@@ -2387,7 +2397,10 @@ cmd_vm_gpu() {
             [[ -n "$vm_name" ]] && IWT_VM_NAME="$vm_name"
             gpu_status
             ;;
-        list-host)
+        list)
+            gpu_list_vm
+            ;;
+        list-host|host)
             gpu_list_host
             ;;
         iommu)
@@ -2414,9 +2427,13 @@ iwt vm gpu - Manage GPU passthrough
 
 Subcommands:
   attach [options]        Attach a GPU to the VM (VM must be stopped)
+  add                     Alias for attach
   detach                  Remove GPU from the VM
+  remove                  Alias for detach
   status                  Show GPU device status
+  list                    List GPU devices attached to the VM
   list-host               List GPUs available on the host
+  host                    Alias for list-host
   iommu check             Check IOMMU status
   iommu groups            Show IOMMU groups and devices
   looking-glass check     Check looking-glass prerequisites

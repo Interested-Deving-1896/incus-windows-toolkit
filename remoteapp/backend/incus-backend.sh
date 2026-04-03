@@ -674,6 +674,32 @@ gpu_list_host() {
     fi
 }
 
+gpu_list_vm() {
+    if ! vm_exists; then
+        die "VM '$IWT_VM_NAME' does not exist"
+    fi
+
+    info "GPUs attached to '$IWT_VM_NAME':"
+    echo ""
+    printf "  %-20s %-12s %s\n" "DEVICE" "TYPE" "PCI"
+    printf "  %-20s %-12s %s\n" "------" "----" "---"
+
+    local found=false
+    while IFS= read -r dev; do
+        [ -n "$dev" ] || continue
+        local gtype pci
+        gtype=$(incus config device get "$IWT_VM_NAME" "$dev" gputype 2>/dev/null || echo "physical")
+        pci=$(incus config device get   "$IWT_VM_NAME" "$dev" pci     2>/dev/null || echo "")
+        found=true
+        printf "  %-20s %-12s %s\n" "$dev" "$gtype" "$pci"
+    done < <(incus config device list "$IWT_VM_NAME" 2>/dev/null \
+             | grep "gpu" | awk '{print $1}' || true)
+
+    if ! $found; then
+        info "  No GPU devices attached"
+    fi
+}
+
 gpu_attach() {
     local gpu_type="${1:-physical}"
     local pci_addr="${2:-}"
