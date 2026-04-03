@@ -70,8 +70,8 @@ cmd_publish() {
 
     case "$subcmd" in
         create)  _cmd_publish_create "$@" ;;
-        list)    _cmd_publish_list   "$@" ;;
-        delete)  _cmd_publish_delete "$@" ;;
+        list|ls) _cmd_publish_list   "$@" ;;
+        delete|rm) _cmd_publish_delete "$@" ;;
         help|--help|-h)
             cat <<EOF
 iwt publish — create and manage Incus images from Windows VMs
@@ -2052,7 +2052,7 @@ cmd_vm_net() {
         forward|fwd)
             cmd_vm_net_forward "$@"
             ;;
-        unforward|unfwd)
+        unforward|unfwd|rm)
             cmd_vm_net_forward remove "$@"
             ;;
         list|ls)
@@ -2320,6 +2320,12 @@ cmd_vm_usb() {
             bold "USB devices on host:"
             usb_list_host
             ;;
+        ls)
+            usb_list_vm
+            ;;
+        rm)
+            cmd_vm_usb detach "$@"
+            ;;
         help|--help|-h)
             cat <<EOF
 iwt vm usb - Manage USB device passthrough
@@ -2402,6 +2408,12 @@ cmd_vm_gpu() {
             ;;
         list-host|host)
             gpu_list_host
+            ;;
+        ls)
+            gpu_list_vm
+            ;;
+        rm)
+            cmd_vm_gpu detach "$@"
             ;;
         iommu)
             local subcmd2="${1:-check}"
