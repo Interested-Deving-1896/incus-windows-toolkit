@@ -107,7 +107,7 @@ install_erofs() {
         require_cmd git "git"
         local src_dir="${IWT_BUILD_DIR:-/tmp/iwt-build}/erofs-utils"
         mkdir -p "$(dirname "$src_dir")"
-        git clone --depth=1 https://github.com/erofs/erofs-utils.git "$src_dir"
+        git clone --depth=1 https://gitlab.com/openos-project/upstream-mirrors/erofs-utils.git "$src_dir"
         cd "$src_dir"
         ./autogen.sh
         ./configure --enable-fuse

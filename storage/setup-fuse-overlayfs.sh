@@ -97,7 +97,7 @@ install_fuse_overlayfs() {
         info "Building fuse-overlayfs from source..."
         require_cmd git "git"
         local src_dir="${IWT_BUILD_DIR:-/tmp/iwt-build}/fuse-overlayfs"
-        git clone --depth=1 https://github.com/containers/fuse-overlayfs.git "$src_dir"
+        git clone --depth=1 https://gitlab.com/openos-project/upstream-mirrors/fuse-overlayfs.git "$src_dir"
         cd "$src_dir"
         ./autogen.sh
         ./configure

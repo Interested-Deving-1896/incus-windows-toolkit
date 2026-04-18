@@ -102,7 +102,7 @@ _build_svcguest_from_source() {
     require_cmd x86_64-w64-mingw32-gcc "mingw-w64"
     local src_dir="${IWT_BUILD_DIR:-/tmp/iwt-build}/SvcGuest"
     require_cmd git "git"
-    git clone --depth=1 https://github.com/nicowillis/SvcGuest.git "$src_dir"
+    git clone --depth=1 https://gitlab.com/openos-project/upstream-mirrors/SvcGuest.git "$src_dir"
     cd "$src_dir"
     x86_64-w64-mingw32-gcc -o "$SVCGUEST_BIN" SvcGuest.c -ladvapi32
     ok "SvcGuest.exe built: $SVCGUEST_BIN"

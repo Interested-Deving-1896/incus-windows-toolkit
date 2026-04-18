@@ -123,7 +123,7 @@ setup_kvmfr() {
     if ! modinfo kvmfr &>/dev/null 2>&1; then
         err "KVMFR module not found. Build it from looking-glass source:"
         echo ""
-        echo "  git clone https://github.com/gnif/LookingGlass"
+        echo "  git clone https://gitlab.com/openos-project/upstream-mirrors/LookingGlass"
         echo "  cd LookingGlass/module"
         echo "  make"
         echo "  sudo make install"

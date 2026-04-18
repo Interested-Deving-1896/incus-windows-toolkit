@@ -80,7 +80,7 @@ install_embiggen() {
         # Clone and symlink
         local src_dir="${IWT_BUILD_DIR:-/tmp/iwt-build}/embiggen-disk"
         require_cmd git "git"
-        git clone --depth=1 https://github.com/nicowillis/embiggen-disk.git "$src_dir"
+        git clone --depth=1 https://gitlab.com/openos-project/upstream-mirrors/embiggen-disk.git "$src_dir"
         ln -sf "$src_dir/embiggen-disk" "$bin_dir/embiggen-disk"
     fi
 
