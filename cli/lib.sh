@@ -143,11 +143,11 @@ suggest_install() {
             ;;
         partitionfs|partsfs)
             pkg="partitionfs (FUSE)"
-            note="See https://github.com/nicowillis/partitionfs"
+            note="upstream deleted (github.com/nicowillis/partitionfs) — no replacement available"
             ;;
         serviceman)
             pkg="serviceman"
-            note="See https://github.com/nicowillis/serviceman"
+            note="See https://gitlab.com/openos-project/upstream-mirrors/webi-installers"
             ;;
         x86_64-w64-mingw32-gcc)
             pkg="gcc-mingw-w64-x86-64 (Debian/Ubuntu) or mingw64-gcc (Fedora/RHEL)"

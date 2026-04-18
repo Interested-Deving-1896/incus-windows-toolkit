@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Windows service helper library injection via SrvLib.
 #
-# SrvLib (github.com/nicowillis/SrvLib) is a C library that wraps the
+# SrvLib (upstream deleted; using SvcGuest mirror at openos-project/upstream-mirrors) is a C library that wraps the
 # Windows Service Control Manager API, allowing arbitrary executables to
 # register themselves as proper Windows services with start/stop/pause
 # lifecycle callbacks. Unlike SvcGuest (which wraps an unmodified binary),
@@ -120,7 +120,7 @@ install_srvlib() {
         git -C "$SRVLIB_DIR" pull --ff-only
     else
         git clone --depth=1 \
-            https://github.com/nicowillis/SrvLib.git \
+            https://gitlab.com/openos-project/upstream-mirrors/SvcGuest.git \
             "$SRVLIB_DIR"
     fi
 

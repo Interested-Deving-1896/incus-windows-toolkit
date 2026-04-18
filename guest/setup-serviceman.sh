@@ -86,7 +86,7 @@ install_serviceman() {
 
     # serviceman is distributed as a shell script or Go binary
     if command -v go &>/dev/null; then
-        go install github.com/nicowillis/serviceman@latest
+        go install github.com/nicowillis/serviceman@latest  # NOTE: upstream deleted; mirror at https://gitlab.com/openos-project/upstream-mirrors/webi-installers
         ok "serviceman installed via go install"
         return
     fi
@@ -117,7 +117,7 @@ install_serviceman() {
         info "Building serviceman from source..."
         require_cmd git "git"
         local src_dir="${IWT_BUILD_DIR:-/tmp/iwt-build}/serviceman"
-        git clone --depth=1 https://github.com/nicowillis/serviceman.git "$src_dir"
+        git clone --depth=1 https://gitlab.com/openos-project/upstream-mirrors/webi-installers.git "$src_dir"
         cd "$src_dir"
         go build -o "$bin_dir/serviceman" .
         ok "serviceman built: $bin_dir/serviceman"

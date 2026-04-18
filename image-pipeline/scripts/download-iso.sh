@@ -586,7 +586,7 @@ download_consumer_arm64() {
         echo ""
         echo "  Alternatively, on Linux:"
         echo ""
-        echo "    git clone https://github.com/uup-dump/converter"
+        echo "    git clone https://gitlab.com/openos-project/upstream-mirrors/uup-dump-converter"
         echo "    cd converter"
         echo "    ./convert.sh wubi ${build_id} ${lang_code} professional"
         echo ""
