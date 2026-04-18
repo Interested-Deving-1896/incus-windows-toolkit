@@ -1,0 +1,93 @@
+# Converted from GitHub Actions — incus-windows-toolkit
+# Mirrors: ci.yaml, release.yaml
+
+stages:
+  - test
+  - release
+
+default:
+  image: ubuntu:22.04
+
+# ── CI ────────────────────────────────────────────────────────────────────────
+syntax:
+  stage: test
+  script:
+    - |
+      failed=0
+      for f in $(find . -name "*.sh" ! -path "./.git/*"); do
+        bash -n "$f" || { echo "FAIL syntax: $f"; failed=1; }
+      done
+      exit $failed
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
+
+shellcheck:
+  stage: test
+  before_script:
+    - apt-get update -qq && apt-get install -y shellcheck
+  script:
+    - |
+      failed=0
+      for f in $(find . -name "*.sh" ! -path "./.git/*"); do
+        shellcheck --severity=warning "$f" || { echo "FAIL: $f"; failed=1; }
+      done
+      exit $failed
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
+
+# ── Package builds ────────────────────────────────────────────────────────────
+build:deb:
+  stage: release
+  before_script:
+    - apt-get update -qq && apt-get install -y dpkg-dev
+  script:
+    - bash packaging/build-deb.sh || true
+  artifacts:
+    paths: ["*.deb"]
+    expire_in: 30 days
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v/'
+
+build:rpm:
+  stage: release
+  image: fedora:latest
+  script:
+    - bash packaging/build-rpm.sh || true
+  artifacts:
+    paths: ["*.rpm"]
+    expire_in: 30 days
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v/'
+
+build:aur:
+  stage: release
+  image: archlinux:latest
+  script:
+    - bash packaging/build-aur.sh || true
+  artifacts:
+    paths: ["*.pkg.tar.zst"]
+    expire_in: 30 days
+  allow_failure: true
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v/'
+
+# ── GitLab Release ────────────────────────────────────────────────────────────
+gitlab-release:
+  stage: release
+  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  needs: [build:deb, build:rpm]
+  script:
+    - echo "Creating release $CI_COMMIT_TAG"
+  release:
+    tag_name: '$CI_COMMIT_TAG'
+    description: 'incus-windows-toolkit $CI_COMMIT_TAG'
+    assets:
+      links:
+        - name: 'Debian package'
+          url: '$CI_PROJECT_URL/-/jobs/artifacts/$CI_COMMIT_TAG/browse?job=build:deb'
+        - name: 'RPM package'
+          url: '$CI_PROJECT_URL/-/jobs/artifacts/$CI_COMMIT_TAG/browse?job=build:rpm'
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v/'
