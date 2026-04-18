@@ -1,7 +1,7 @@
 # IWT - Incus Windows Toolkit
 
-[![CI](https://github.com/Interested-Deving-1896/incus-windows-toolkit/actions/workflows/ci.yaml/badge.svg)](https://github.com/Interested-Deving-1896/incus-windows-toolkit/actions/workflows/ci.yaml)
-[![Release](https://img.shields.io/github/v/release/Interested-Deving-1896/incus-windows-toolkit)](https://github.com/Interested-Deving-1896/incus-windows-toolkit/releases)
+[![CI](https://gitlab.com/OSPF1896/incus-windows-toolkit/actions/workflows/ci.yaml/badge.svg)](https://gitlab.com/OSPF1896/incus-windows-toolkit/actions/workflows/ci.yaml)
+[![Release](https://img.shields.io/github/v/release/Interested-Deving-1896/incus-windows-toolkit)](https://gitlab.com/OSPF1896/incus-windows-toolkit/releases)
 [![License](https://img.shields.io/github/license/Interested-Deving-1896/incus-windows-toolkit)](LICENSE)
 
 Run Windows VMs and seamless Windows applications on Linux, managed entirely
@@ -37,7 +37,7 @@ and ad-hoc scripts.
 
 ```bash
 # Install
-git clone https://github.com/Interested-Deving-1896/incus-windows-toolkit
+git clone https://gitlab.com/OSPF1896/incus-windows-toolkit
 cd incus-windows-toolkit
 sudo make install
 
@@ -185,7 +185,7 @@ incus-windows-toolkit/
 ### From source
 
 ```bash
-git clone https://github.com/Interested-Deving-1896/incus-windows-toolkit
+git clone https://gitlab.com/OSPF1896/incus-windows-toolkit
 cd incus-windows-toolkit
 sudo make install          # installs to /usr/local
 sudo make PREFIX=/usr install  # or /usr for distro packaging

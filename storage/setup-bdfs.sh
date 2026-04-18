@@ -17,7 +17,7 @@
 #   - help        Show this help
 #
 # Requires btrfs-dwarfs-framework to be built and installed:
-#   https://github.com/Interested-Deving-1896/btrfs-dwarfs-framework
+#   https://gitlab.com/OSPF1896/btrfs-dwarfs-framework
 #
 # Usage:
 #   setup-bdfs.sh <subcommand> [options]
@@ -657,7 +657,7 @@ cmd_check() {
         ver=$(bdfs --version 2>/dev/null | head -1 || echo "unknown")
         _chk "bdfs CLI ($ver)" "ok"
     else
-        _chk "bdfs CLI" "not found — build from https://github.com/Interested-Deving-1896/btrfs-dwarfs-framework"
+        _chk "bdfs CLI" "not found — build from https://gitlab.com/OSPF1896/btrfs-dwarfs-framework"
     fi
 
     # bdfs_daemon
@@ -710,7 +710,7 @@ cmd_check() {
     if [[ $fail_count -gt 0 ]]; then
         echo ""
         info "Build btrfs-dwarfs-framework:"
-        info "  git clone https://github.com/Interested-Deving-1896/btrfs-dwarfs-framework"
+        info "  git clone https://gitlab.com/OSPF1896/btrfs-dwarfs-framework"
         info "  cd btrfs-dwarfs-framework && make all && sudo make install"
         info "  sudo insmod kernel/btrfs_dwarfs/btrfs_dwarfs.ko"
     fi
@@ -1167,7 +1167,7 @@ cmd_install_blend_template() {
     sudo tee "$template_file" > /dev/null <<EOF
 [Unit]
 Description=IWT bdfs blend namespace mount: %I
-Documentation=https://github.com/Interested-Deving-1896/incus-windows-toolkit
+Documentation=https://gitlab.com/OSPF1896/incus-windows-toolkit
 After=network-online.target bdfs_daemon.service
 Requires=bdfs_daemon.service
 ConditionPathIsDirectory=%f
@@ -1240,7 +1240,7 @@ cmd_install_units() {
             sudo tee "$service_file" > /dev/null <<EOF
 [Unit]
 Description=IWT bdfs: re-attach virtiofs shares and remount blend namespaces
-Documentation=https://github.com/Interested-Deving-1896/incus-windows-toolkit
+Documentation=https://gitlab.com/OSPF1896/incus-windows-toolkit
 # Run after Incus and the network are up so VMs can be queried
 After=network-online.target incus.service
 Wants=network-online.target
@@ -1602,7 +1602,7 @@ EOF
 _require_bdfs() {
     if ! command -v bdfs &>/dev/null; then
         die "bdfs not found. Build btrfs-dwarfs-framework and install it first.
-  git clone https://github.com/Interested-Deving-1896/btrfs-dwarfs-framework
+  git clone https://gitlab.com/OSPF1896/btrfs-dwarfs-framework
   cd btrfs-dwarfs-framework && make all && sudo make install"
     fi
     if ! command -v bdfs_daemon &>/dev/null; then

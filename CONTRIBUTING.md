@@ -3,7 +3,7 @@
 ## Development Setup
 
 ```bash
-git clone https://github.com/Interested-Deving-1896/incus-windows-toolkit
+git clone https://gitlab.com/OSPF1896/incus-windows-toolkit
 cd incus-windows-toolkit
 make test    # run unit tests + shellcheck
 ```

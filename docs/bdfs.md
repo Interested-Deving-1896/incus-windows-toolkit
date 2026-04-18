@@ -1,6 +1,6 @@
 # bdfs — BTRFS+DwarFS Hybrid Storage
 
-bdfs integrates [btrfs-dwarfs-framework](https://github.com/Interested-Deving-1896/btrfs-dwarfs-framework)
+bdfs integrates [btrfs-dwarfs-framework](https://gitlab.com/OSPF1896/btrfs-dwarfs-framework)
 as an optional storage backend. It merges a writable BTRFS upper layer with
 one or more read-only DwarFS lower layers into a single unified namespace.
 Reads fall through BTRFS → DwarFS; writes always land on BTRFS with automatic
@@ -17,9 +17,9 @@ through WinFsp.
 **Host**
 
 - Linux kernel with FUSE support
-- [btrfs-dwarfs-framework](https://github.com/Interested-Deving-1896/btrfs-dwarfs-framework) built and installed:
+- [btrfs-dwarfs-framework](https://gitlab.com/OSPF1896/btrfs-dwarfs-framework) built and installed:
   ```
-  git clone https://github.com/Interested-Deving-1896/btrfs-dwarfs-framework
+  git clone https://gitlab.com/OSPF1896/btrfs-dwarfs-framework
   cd btrfs-dwarfs-framework && make all && sudo make install
   sudo insmod kernel/btrfs_dwarfs/btrfs_dwarfs.ko
   ```

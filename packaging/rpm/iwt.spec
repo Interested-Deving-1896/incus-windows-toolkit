@@ -3,7 +3,7 @@ Version:        1.0.0
 Release:        1%{?dist}
 Summary:        Unified CLI for Windows VM management on Incus
 License:        MIT
-URL:            https://github.com/Interested-Deving-1896/incus-windows-toolkit
+URL:            https://gitlab.com/OSPF1896/incus-windows-toolkit
 Source0:        %{name}-%{version}.tar.gz
 BuildArch:      noarch
 Requires:       bash >= 4.0, curl, jq

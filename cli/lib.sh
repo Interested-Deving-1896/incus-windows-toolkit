@@ -392,7 +392,7 @@ IWT_INJECT_WINBTRFS=true
 # --- bdfs (btrfs-dwarfs-framework) settings ---
 # Set to true to enable bdfs hybrid BTRFS+DwarFS storage for image archiving.
 # Requires btrfs-dwarfs-framework to be built and installed.
-# https://github.com/Interested-Deving-1896/btrfs-dwarfs-framework
+# https://gitlab.com/OSPF1896/btrfs-dwarfs-framework
 IWT_BDFS_ENABLED=false
 
 # Default compression algorithm for bdfs export/demote operations.

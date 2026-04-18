@@ -473,7 +473,7 @@ cmd_doctor() {
         ok "  bdfs CLI + bdfs_daemon"
         ok_count=$((ok_count + 1))
     else
-        warn "  bdfs not found (optional; build from https://github.com/Interested-Deving-1896/btrfs-dwarfs-framework)"
+        warn "  bdfs not found (optional; build from https://gitlab.com/OSPF1896/btrfs-dwarfs-framework)"
     fi
     if check_bdfs_module; then
         ok "  btrfs_dwarfs kernel module"
