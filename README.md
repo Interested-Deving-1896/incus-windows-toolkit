@@ -1,8 +1,8 @@
 # IWT - Incus Windows Toolkit
 
 [![CI](https://gitlab.com/openos-project/incus_deving/incus-windows-toolkit/actions/workflows/ci.yaml/badge.svg)](https://gitlab.com/openos-project/incus_deving/incus-windows-toolkit/actions/workflows/ci.yaml)
-[![Release](https://img.shields.io/github/v/release/Interested-Deving-1896/incus-windows-toolkit)](https://gitlab.com/openos-project/incus_deving/incus-windows-toolkit/releases)
-[![License](https://img.shields.io/github/license/Interested-Deving-1896/incus-windows-toolkit)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/openos-project/incus-windows-toolkit)](https://gitlab.com/openos-project/incus_deving/incus-windows-toolkit/releases)
+[![License](https://img.shields.io/github/license/openos-project/incus-windows-toolkit)](LICENSE)
 
 Run Windows VMs and seamless Windows applications on Linux, managed entirely
 through [Incus](https://linuxcontainers.org/incus).
