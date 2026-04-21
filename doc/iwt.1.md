@@ -111,4 +111,4 @@ incus(1), qemu-img(1), xfreerdp3(1)
 
 # BUGS
 
-Report bugs at: https://gitlab.com/OSPF1896/incus-windows-toolkit/issues
+Report bugs at: https://gitlab.com/openos-project/incus_deving/incus-windows-toolkit/issues

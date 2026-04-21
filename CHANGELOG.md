@@ -23,7 +23,7 @@
 
 ### bdfs — BTRFS+DwarFS Hybrid Storage
 
-Integrates [btrfs-dwarfs-framework](https://gitlab.com/OSPF1896/btrfs-dwarfs-framework)
+Integrates [btrfs-dwarfs-framework](https://gitlab.com/openos-project/linux-kernel_filesystem_deving/btrfs-dwarfs-framework)
 as an optional storage backend that blends a writable BTRFS upper layer with
 read-only DwarFS lower layers into a unified namespace.
 
