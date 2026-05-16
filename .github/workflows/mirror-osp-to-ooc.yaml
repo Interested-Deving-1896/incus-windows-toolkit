@@ -46,7 +46,7 @@ jobs:
             > ~/.git-credentials
 
           git remote add mirror \
-            "https://github.com/OpenOS-Project-Ecosystem-OOC/incus-windows-toolkit.git"
+            "https://github.com/Interested-Deving-1896/incus-windows-toolkit.git"
 
           # Push all local branches and tags
           git push mirror --all --force
