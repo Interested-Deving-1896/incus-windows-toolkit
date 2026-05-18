@@ -1,36 +1,28 @@
 name: Mirror to OpenOS-Project-Ecosystem-OOC
 
-# This workflow lives in the upstream repo (OSPF1896) so it
-# survives force-push syncs to OpenOS-Project-OSP. When mirrored to OSP,
-# it runs there and pushes OSP's content downstream to OOC.
-#
 # Sync chain:
-#   OSPF1896  →(mirror.yaml)→  OpenOS-Project-OSP
-#   OpenOS-Project-OSP  →(this file)→  OpenOS-Project-Ecosystem-OOC
+#   Interested-Deving-1896  ->(upstream mirror.yaml)->  OpenOS-Project-OSP
+#   OpenOS-Project-OSP  ->(this file)->  OpenOS-Project-Ecosystem-OOC
 
 on:
   push:
     branches: ["**"]
     tags: ["**"]
   schedule:
-    # Runs 15 minutes after the upstream→OSP sync to allow OSP to settle
+    # Runs 15 minutes after the upstream->OSP sync to allow OSP to settle
     - cron: "15 * * * *"
   workflow_dispatch:
 
 jobs:
   mirror:
     runs-on: ubuntu-latest
-    # Only run when this workflow is executing in the OSP repo.
-    # In the upstream repo this job is a no-op so it doesn't create
-    # a redundant second push to OOC from the wrong source.
+    # Only run when executing in the OSP repo — no-op if mirrored elsewhere
     if: github.repository == 'OpenOS-Project-OSP/incus-windows-toolkit'
     steps:
       - name: Checkout full history
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          # Disable the default GITHUB_TOKEN credential so our MIRROR_TOKEN
-          # is used for the push step instead
           persist-credentials: false
 
       - name: Fetch all branches and tags
@@ -40,15 +32,13 @@ jobs:
         env:
           MIRROR_TOKEN: ${{ secrets.MIRROR_TOKEN }}
         run: |
-          # Configure credential store with the mirror PAT
           git config --global credential.helper store
           printf 'https://x-access-token:%s@github.com\n' "$MIRROR_TOKEN" \
             > ~/.git-credentials
 
           git remote add mirror \
-            "https://github.com/Interested-Deving-1896/incus-windows-toolkit.git"
+            "https://github.com/OpenOS-Project-Ecosystem-OOC/incus-windows-toolkit.git"
 
-          # Push all local branches and tags
           git push mirror --all --force
           git push mirror --tags --force
 
