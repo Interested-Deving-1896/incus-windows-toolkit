@@ -30,7 +30,7 @@ jobs:
         run: |
           # Configure credential store with the mirror PAT
           git config --global credential.helper store
-          printf 'https://x-access-token:%s@github.com\n' "$MIRROR_TOKEN" \
+          printf 'https://oauth2:%s@gitlab.com\n' "$MIRROR_TOKEN" \
             > ~/.git-credentials
 
           git remote add mirror \
