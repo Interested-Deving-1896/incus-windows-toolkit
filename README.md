@@ -4,7 +4,7 @@
 [![Built with Ona](https://ona.com/build-with-ona.svg)](https://app.ona.com/#https://github.com/Interested-Deving-1896/incus-windows-toolkit)
 
 <!-- AI:start:what-it-does -->
-This project provides a toolkit for managing Windows virtual machines on Incus, a container and virtual machine manager based on QEMU/KVM. It addresses the challenges of setting up and optimizing Windows VMs by integrating Btrfs storage, the WinBtrfs guest driver, and DwarFS for image compression. It is designed for developers and system administrators who need efficient tools for deploying and maintaining Windows VMs in Linux-based environments.
+This project provides a toolkit for managing Windows virtual machines on Incus, a container and virtual machine manager based on QEMU/KVM. It addresses the need for efficient VM storage and performance by integrating Btrfs for host storage, WinBtrfs for guest filesystem support, and DwarFS for image compression. It is used by developers and system administrators working with Windows VMs in Linux-based environments.
 <!-- AI:end:what-it-does -->
 
 ## Architecture
