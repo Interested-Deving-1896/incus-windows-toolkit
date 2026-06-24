@@ -125,12 +125,7 @@ Direct commits to OSP or OOC are detected and opened as PRs back to `Interested-
 ## Origins
 
 <!-- AI:start:origins -->
-
-Original project — toolkit for running and managing Windows VMs on Incus (QEMU/KVM) with Btrfs storage.
-
-| Origin | Host | Fork in I-D-1896 |
-|--------|------|-----------------|
-| [lxc/incus](https://github.com/lxc/incus) | GitHub | ✅ |
+_Original project — no upstream fork._
 <!-- AI:end:origins -->
 
 ## Resources
@@ -144,5 +139,5 @@ Original project — toolkit for running and managing Windows VMs on Incus (QEMU
 ## License
 
 <!-- AI:start:license -->
-[Apache-2.0](https://github.com/Interested-Deving-1896/incus-windows-toolkit/blob/main/LICENSE) © 2026 [Interested-Deving-1896](https://github.com/Interested-Deving-1896)
+<!-- License not detected — add a LICENSE file to this repo. -->
 <!-- AI:end:license -->
