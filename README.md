@@ -125,15 +125,18 @@ Direct commits to OSP or OOC are detected and opened as PRs back to `Interested-
 ## Origins
 
 <!-- AI:start:origins -->
-_Original project — no upstream fork._
+
+Original project — toolkit for running and managing Windows VMs on Incus (QEMU/KVM) with Btrfs storage.
+
+| Origin | Host | Fork in I-D-1896 |
+|--------|------|-----------------|
+| [lxc/incus](https://github.com/lxc/incus) | GitHub | ✅ |
 <!-- AI:end:origins -->
 
 ## Resources
 
 <!-- AI:start:resources -->
-| File | Description |
-|---|---|
-| [dep-graph/origins.md](https://github.com/Interested-Deving-1896/incus-windows-toolkit/blob/main/dep-graph/origins.md) | Dependency graph (Markdown table) |
+_No additional resource files found._
 <!-- AI:end:resources -->
 
 ## License
