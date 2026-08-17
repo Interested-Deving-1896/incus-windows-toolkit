@@ -1,7 +1,8 @@
 [update-readmes]   Mode: rewrite — migrating to template structure...
 # incus-windows-toolkit
 
-[![Built with Ona](https://ona.com/build-with-ona.svg)](https://app.ona.com/#https://github.com/Interested-Deving-1896/incus-windows-toolkit)
+[![Built with Ona](https://ona.com/build-with-ona.svg)](https://app.ona.com/#https://github.com/Interested-Deving-1896/incus-windows-toolkit) [![KDE Eco](https://img.shields.io/badge/KDE%20Eco-certified-brightgreen?logo=kde&logoColor=white&style=flat-square)](https://eco.kde.org/) [![Blue Angel](https://img.shields.io/badge/Blue%20Angel-DE--UZ%20215-0055a4?style=flat-square)](https://www.blauer-engel.de/en/certification/criteria) [![Energy](https://api.green-coding.io/v1/ci/badge/get?repo=Interested-Deving-1896%2Fincus-windows-toolkit&branch=main&workflow=eco-audit.yml)](https://metrics.green-coding.io/ci-index.html)
+
 
 <!-- AI:start:what-it-does -->
 This project provides a toolkit for managing Windows virtual machines on Incus, a container and virtual machine manager based on QEMU/KVM. It addresses the setup and maintenance of Windows VMs by integrating Btrfs storage, WinBtrfs guest drivers, and DwarFS image compression. It is used by system administrators and developers working with Incus to streamline VM lifecycle management and optimize storage efficiency.
@@ -115,9 +116,9 @@ Direct commits to OSP or OOC are detected and opened as PRs back to `Interested-
 ## Contributors
 
 <!-- AI:start:contributors -->
-[@Interested-Deving-1896](https://github.com/Interested-Deving-1896): 43 commits  
-[@ona-agent](https://github.com/ona-agent): 6 commits  
-[@actions-user](https://github.com/actions-user): 1 commit  
+[@Interested-Deving-1896](https://github.com/Interested-Deving-1896): 43 commits
+[@ona-agent](https://github.com/ona-agent): 6 commits
+[@actions-user](https://github.com/actions-user): 1 commit
 
 *Note: This repository is a mirror. Please refer to the upstream source for the original project.*
 <!-- AI:end:contributors -->
@@ -140,6 +141,20 @@ Original project — toolkit for running and managing Windows VMs on Incus (QEMU
 |---|---|
 | [dep-graph/origins.md](https://github.com/Interested-Deving-1896/incus-windows-toolkit/blob/main/dep-graph/origins.md) | Dependency graph (Markdown table) |
 <!-- AI:end:resources -->
+
+<!-- AI:start:accessibility -->
+This repo uses automated accessibility auditing via `check-accessibility.yml`.
+
+Checks include: CODEOWNERS ownership coverage, README screen-reader compatibility,
+WCAG 2.1 AA HTML compliance, audio overview (espeak-ng), and Braille output (liblouis).
+
+
+
+
+Run the [Check Accessibility](https://github.com/Interested-Deving-1896/incus-windows-toolkit/actions/workflows/check-accessibility.yml)
+workflow to generate the first report and accessibility artifacts.
+See [DOCS/accessibility.md](https://github.com/Interested-Deving-1896/incus-windows-toolkit/blob/main/DOCS/accessibility.md) for the full reference.
+<!-- AI:end:accessibility -->
 
 ## License
 
