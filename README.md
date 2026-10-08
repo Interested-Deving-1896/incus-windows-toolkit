@@ -117,11 +117,11 @@ Direct commits to OSP or OOC are detected and opened as PRs back to `Interested-
 ## Contributors
 
 <!-- AI:start:contributors -->
-[@Interested-Deving-1896](https://github.com/Interested-Deving-1896): 43 commits
-[@ona-agent](https://github.com/ona-agent): 6 commits
-[@actions-user](https://github.com/actions-user): 1 commit
-
-*Note: This repository is a mirror. Please refer to the upstream source for the original project.*
+| Contributor | Commits |
+|---|---|
+| [@Interested-Deving-1896](https://github.com/Interested-Deving-1896) | 56 |
+| [@ona-agent](https://github.com/ona-agent) | 6 |
+| [@actions-user](https://github.com/actions-user) | 1 |
 <!-- AI:end:contributors -->
 
 ## Origins
